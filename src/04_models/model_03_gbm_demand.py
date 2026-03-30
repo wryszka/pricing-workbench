@@ -2,13 +2,11 @@
 # MAGIC %md
 # MAGIC # Model 3: GBM Demand — Conversion Propensity
 # MAGIC
-# MAGIC Trains a gradient boosted model to predict **conversion probability**
-# MAGIC (will a quote turn into a bound policy?). This drives the commercial pricing
-# MAGIC overlay — understanding price elasticity and demand curves.
+# MAGIC Trains a gradient boosted model to predict **conversion probability**.
+# MAGIC Drives the commercial pricing overlay — price elasticity and demand curves.
 # MAGIC
-# MAGIC **Target:** `converted` (binary: 1=bound, 0=declined)
-# MAGIC **Method:** SparkML GBTClassifier
-# MAGIC **Data source:** Quote history joined with UPT features
+# MAGIC **Target:** `converted` (binary)
+# MAGIC **Method:** LightGBM classifier
 
 # COMMAND ----------
 
@@ -22,8 +20,12 @@ fqn = f"{catalog}.{schema}"
 # COMMAND ----------
 
 import mlflow
+import numpy as np
+import pandas as pd
+from lightgbm import LGBMClassifier
+from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
 import pyspark.sql.functions as F
-from pyspark.sql.functions import col, when, lit
+from pyspark.sql.functions import col, when
 
 mlflow.set_registry_uri("databricks-uc")
 try:
@@ -36,55 +38,38 @@ except Exception:
 
 # MAGIC %md
 # MAGIC ## Load quote data enriched with UPT features
-# MAGIC We join quote history with the UPT to get the full feature set at the time of quoting.
 
 # COMMAND ----------
 
 quotes = spark.table(f"{fqn}.internal_quote_history")
 upt = spark.table(f"{fqn}.unified_pricing_table_live")
 
-# Create binary target
-quotes_labeled = (quotes
-    .withColumn("converted_flag", when(col("converted") == "Y", 1.0).otherwise(0.0))
-    .withColumn("competitor_flag", when(col("competitor_quoted") == "Y", 1.0).otherwise(0.0))
+# Get representative features per SIC+postcode from UPT
+upt_features = (upt
+    .select("sic_code", "postcode_sector",
+            "flood_zone_rating", "crime_theft_index", "subsidence_risk",
+            "composite_location_risk",
+            "market_median_rate", "competitor_a_min_premium", "price_index_trend",
+            "credit_default_probability", "business_stability_score",
+            "population_density_per_km2", "distance_to_coast_km")
+    .dropDuplicates(["sic_code", "postcode_sector"])
 )
 
-# Enrich quotes with UPT features via SIC code + postcode
-# For converted quotes with policy_id, join directly
-# For unconverted, join on SIC + postcode to get representative features
-upt_features = upt.select(
-    "sic_code", "postcode_sector",
-    "flood_zone_rating", "crime_theft_index", "subsidence_risk",
-    "composite_location_risk", "location_risk_tier",
-    "market_median_rate", "competitor_a_min_premium", "price_index_trend",
-    "credit_default_probability", "business_stability_score",
-    "population_density_per_km2", "distance_to_coast_km",
-).dropDuplicates(["sic_code", "postcode_sector"])
-
-df = (quotes_labeled
+enriched = (quotes
+    .withColumn("converted_flag", when(col("converted") == "Y", 1).otherwise(0))
+    .withColumn("competitor_flag", when(col("competitor_quoted") == "Y", 1).otherwise(0))
     .join(upt_features, ["sic_code", "postcode_sector"], "left")
     .withColumn("quote_to_market_ratio",
         when(col("market_median_rate").isNotNull() & (col("market_median_rate") > 0),
              (col("quoted_premium") / (col("sum_insured") / 1000)) / col("market_median_rate"))
         .otherwise(None))
-    .withColumn("log_quoted_premium", F.log1p(col("quoted_premium")))
-    .withColumn("log_sum_insured", F.log1p(col("sum_insured")))
+    .withColumn("log_premium", F.log1p(col("quoted_premium")))
+    .withColumn("log_si", F.log1p(col("sum_insured")))
     .withColumn("log_turnover", F.log1p(col("annual_turnover")))
 )
 
-conversion_rate = df.agg(F.avg("converted_flag")).collect()[0][0]
-print(f"Total quotes: {df.count()}")
-print(f"Conversion rate: {conversion_rate:.1%}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Prepare features for AutoML
-
-# COMMAND ----------
-
 feature_cols = [
-    "log_quoted_premium", "log_sum_insured", "log_turnover",
+    "log_premium", "log_si", "log_turnover",
     "competitor_flag", "quote_to_market_ratio",
     "flood_zone_rating", "crime_theft_index", "subsidence_risk",
     "composite_location_risk",
@@ -93,105 +78,72 @@ feature_cols = [
     "population_density_per_km2", "distance_to_coast_km",
 ]
 
-# Fill nulls
-for c in feature_cols:
-    df = df.withColumn(c, F.coalesce(col(c).cast("double"), lit(0.0)))
+pdf = enriched.select("quote_id", "converted_flag", "quote_to_market_ratio", *feature_cols).toPandas()
+pdf[feature_cols] = pdf[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
 
-# Add categorical
-df_model = df.select(
-    "quote_id", "converted_flag",
-    *feature_cols,
-    "sic_code", "location_risk_tier",
-)
-
-# Split
-df_model = df_model.withColumn("split_hash", F.abs(F.hash(col("quote_id"))) % 100)
-train_df = df_model.filter(col("split_hash") < 80)
-test_df = df_model.filter(col("split_hash") >= 80)
-
-print(f"Train: {train_df.count()}, Test: {test_df.count()}")
+print(f"Total quotes: {len(pdf)}, Conversion rate: {pdf['converted_flag'].mean():.1%}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Build pipeline: StringIndexer + Assembler + GBTClassifier
+# MAGIC ## Train/test split
 
 # COMMAND ----------
 
-from pyspark.ml.feature import VectorAssembler, StringIndexer, OneHotEncoder
-from pyspark.ml.classification import GBTClassifier
-from pyspark.ml import Pipeline
-from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
+pdf["split_hash"] = pdf["quote_id"].apply(lambda x: abs(hash(x)) % 100)
+train_pdf = pdf[pdf["split_hash"] < 80].copy()
+test_pdf = pdf[pdf["split_hash"] >= 80].copy()
 
-# Encode categoricals
-stages = []
-encoded_cols = []
-for cat_col in ["sic_code", "location_risk_tier"]:
-    indexer = StringIndexer(inputCol=cat_col, outputCol=f"{cat_col}_idx", handleInvalid="keep")
-    encoder = OneHotEncoder(inputCol=f"{cat_col}_idx", outputCol=f"{cat_col}_vec")
-    stages.extend([indexer, encoder])
-    encoded_cols.append(f"{cat_col}_vec")
-
-assembler = VectorAssembler(
-    inputCols=feature_cols + encoded_cols,
-    outputCol="features",
-    handleInvalid="skip",
-)
-stages.append(assembler)
-
-gbt = GBTClassifier(
-    featuresCol="features",
-    labelCol="converted_flag",
-    predictionCol="predicted_conversion",
-    maxDepth=5,
-    maxIter=80,
-    stepSize=0.1,
-    subsamplingRate=0.8,
-)
-stages.append(gbt)
-
-pipeline = Pipeline(stages=stages)
+print(f"Train: {len(train_pdf)}, Test: {len(test_pdf)}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Train and evaluate
+# MAGIC ## Train LightGBM Classifier
 
 # COMMAND ----------
 
-with mlflow.start_run(run_name="gbt_demand_conversion") as run:
-    mlflow.log_param("model_type", "GBTClassifier")
+X_train = train_pdf[feature_cols].values
+X_test = test_pdf[feature_cols].values
+y_train = train_pdf["converted_flag"].values
+y_test = test_pdf["converted_flag"].values
+
+with mlflow.start_run(run_name="lgbm_demand_conversion") as run:
+    mlflow.log_param("model_type", "LightGBM_Classifier")
+    mlflow.log_param("n_estimators", 200)
     mlflow.log_param("max_depth", 5)
-    mlflow.log_param("max_iter", 80)
-    mlflow.log_param("step_size", 0.1)
-    mlflow.log_param("features_numeric", len(feature_cols))
-    mlflow.log_param("features_categorical", 2)
+    mlflow.log_param("learning_rate", 0.1)
+    mlflow.log_param("features", len(feature_cols))
     mlflow.log_param("upt_table", f"{fqn}.unified_pricing_table_live")
-    mlflow.log_param("train_rows", train_df.count())
-    mlflow.log_param("test_rows", test_df.count())
+    mlflow.log_param("train_rows", len(train_pdf))
+    mlflow.log_param("test_rows", len(test_pdf))
 
-    model = pipeline.fit(train_df)
-    predictions = model.transform(test_df)
+    model = LGBMClassifier(
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        verbose=-1,
+    )
+    model.fit(X_train, y_train)
 
-    # Metrics
-    auc_eval = BinaryClassificationEvaluator(labelCol="converted_flag", rawPredictionCol="rawPrediction", metricName="areaUnderROC")
-    acc_eval = MulticlassClassificationEvaluator(labelCol="converted_flag", predictionCol="predicted_conversion", metricName="accuracy")
-    prec_eval = MulticlassClassificationEvaluator(labelCol="converted_flag", predictionCol="predicted_conversion", metricName="weightedPrecision")
-    recall_eval = MulticlassClassificationEvaluator(labelCol="converted_flag", predictionCol="predicted_conversion", metricName="weightedRecall")
+    y_proba = model.predict_proba(X_test)[:, 1]
+    y_pred = model.predict(X_test)
 
-    roc_auc = auc_eval.evaluate(predictions)
-    accuracy = acc_eval.evaluate(predictions)
-    precision = prec_eval.evaluate(predictions)
-    recall = recall_eval.evaluate(predictions)
+    roc_auc = roc_auc_score(y_test, y_proba)
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, zero_division=0)
+    recall = recall_score(y_test, y_pred, zero_division=0)
 
     mlflow.log_metric("roc_auc", roc_auc)
     mlflow.log_metric("accuracy", accuracy)
     mlflow.log_metric("precision", precision)
     mlflow.log_metric("recall", recall)
+    mlflow.sklearn.log_model(model, "lgbm_demand_model")
 
-    mlflow.spark.log_model(model, "gbt_demand_model")
-
-    print(f"GBT Demand/Conversion Results:")
+    print(f"LightGBM Demand Results:")
     print(f"  ROC AUC:   {roc_auc:.4f}")
     print(f"  Accuracy:  {accuracy:.4f}")
     print(f"  Precision: {precision:.4f}")
@@ -205,28 +157,22 @@ with mlflow.start_run(run_name="gbt_demand_conversion") as run:
 
 # COMMAND ----------
 
-gbt_model = model.stages[-1]
-importances = gbt_model.featureImportances.toArray()
-all_feature_names = feature_cols + [f"{c}_vec" for c in ["sic_code", "location_risk_tier"]]
+importances = model.feature_importances_
+imp_data = [{"feature": feature_cols[i], "importance": int(importances[i])}
+            for i in range(len(feature_cols)) if importances[i] > 0]
 
-importance_data = []
-for i, imp in enumerate(importances):
-    if i < len(all_feature_names) and imp > 0.005:
-        importance_data.append({"feature": all_feature_names[i], "importance": round(float(imp), 4)})
-
-imp_df = spark.createDataFrame(importance_data)
-display(imp_df.orderBy(col("importance").desc()))
+display(spark.createDataFrame(imp_data).orderBy(col("importance").desc()))
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Demand Curve: Conversion vs Price Ratio
-# MAGIC Shows how conversion probability changes with our price relative to market.
 
 # COMMAND ----------
 
-display(
-    predictions
+test_pdf["predicted_conversion"] = y_proba
+
+demand_df = (spark.createDataFrame(test_pdf[["quote_to_market_ratio", "converted_flag", "predicted_conversion"]])
     .withColumn("price_bucket", F.round(col("quote_to_market_ratio"), 1))
     .filter(col("price_bucket").between(0.3, 3.0))
     .groupBy("price_bucket")
@@ -238,3 +184,5 @@ display(
     .filter(col("quote_count") >= 10)
     .orderBy("price_bucket")
 )
+
+display(demand_df)

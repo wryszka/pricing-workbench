@@ -2,13 +2,12 @@
 # MAGIC %md
 # MAGIC # Model 2: GLM Severity — Average Claim Cost Prediction
 # MAGIC
-# MAGIC Trains a Gamma GLM to predict **claim severity** (average claim cost given a claim occurs).
-# MAGIC Combined with the frequency model, this gives the **burning cost** (pure premium):
-# MAGIC `Technical Price = Frequency × Severity`
+# MAGIC Trains a Gamma GLM to predict **claim severity** (average claim cost given a claim).
+# MAGIC Combined with frequency: `Technical Price = Frequency x Severity`
 # MAGIC
-# MAGIC **Target:** `avg_claim_severity` (average incurred per claim)
-# MAGIC **Distribution:** Gamma (log link) — standard for positive-valued cost data
-# MAGIC **Filter:** Only policies with at least 1 claim
+# MAGIC **Target:** `avg_claim_severity`
+# MAGIC **Distribution:** Gamma (log link)
+# MAGIC **Filter:** Only policies with claims
 
 # COMMAND ----------
 
@@ -22,13 +21,10 @@ fqn = f"{catalog}.{schema}"
 # COMMAND ----------
 
 import mlflow
-import mlflow.spark
-import pyspark.sql.functions as F
-from pyspark.sql.functions import col, when, lit
-from pyspark.ml.feature import VectorAssembler, StringIndexer, OneHotEncoder
-from pyspark.ml.regression import GeneralizedLinearRegression
-from pyspark.ml import Pipeline
-from pyspark.ml.evaluation import RegressionEvaluator
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 mlflow.set_registry_uri("databricks-uc")
 try:
@@ -40,22 +36,13 @@ except Exception:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Load and prepare training data
-# MAGIC Only policies with claims — severity is conditional on a claim occurring.
+# MAGIC ## Load and prepare — policies with claims only
 
 # COMMAND ----------
 
 upt = spark.table(f"{fqn}.unified_pricing_table_live")
 
-# Target: average claim severity (total incurred / claim count)
-df = (upt
-    .filter(col("claim_count_5y") > 0)
-    .filter(col("total_incurred_5y") > 0)
-    .withColumn("avg_claim_severity",
-                (col("total_incurred_5y") / col("claim_count_5y")).cast("double"))
-)
-
-feature_cols_numeric = [
+feature_cols = [
     "annual_turnover", "sum_insured", "building_age_years",
     "flood_zone_rating", "proximity_to_fire_station_km", "crime_theft_index", "subsidence_risk",
     "composite_location_risk", "credit_score", "ccj_count", "years_trading",
@@ -65,16 +52,17 @@ feature_cols_numeric = [
     "elevation_metres", "annual_rainfall_mm", "soil_clay_content_pct",
 ]
 
-feature_cols_categorical = [
-    "construction_type", "industry_risk_tier", "location_risk_tier", "credit_risk_tier",
-]
+select_cols = ["policy_id", "claim_count_5y", "total_incurred_5y"] + feature_cols
+pdf = upt.select(*select_cols).toPandas()
+pdf[feature_cols] = pdf[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
 
-for c in feature_cols_numeric:
-    df = df.withColumn(c, F.coalesce(col(c).cast("double"), lit(0.0)))
+# Filter to policies with claims and compute severity
+pdf = pdf[(pdf["claim_count_5y"] > 0) & (pdf["total_incurred_5y"] > 0)].copy()
+pdf["avg_claim_severity"] = pdf["total_incurred_5y"] / pdf["claim_count_5y"]
+pdf = pdf[pdf["avg_claim_severity"] > 0]
 
-print(f"Training data: {df.count()} rows (policies with claims)")
-print(f"Target mean severity: £{df.agg(F.avg('avg_claim_severity')).collect()[0][0]:,.0f}")
-print(f"Target median severity: £{df.approxQuantile('avg_claim_severity', [0.5], 0.01)[0]:,.0f}")
+print(f"Training data: {len(pdf)} rows (policies with claims)")
+print(f"Mean severity: £{pdf['avg_claim_severity'].mean():,.0f}")
 
 # COMMAND ----------
 
@@ -83,92 +71,57 @@ print(f"Target median severity: £{df.approxQuantile('avg_claim_severity', [0.5]
 
 # COMMAND ----------
 
-df = df.withColumn("split_hash", F.abs(F.hash(col("policy_id"))) % 100)
-train_df = df.filter(col("split_hash") < 80)
-test_df = df.filter(col("split_hash") >= 80)
+pdf["split_hash"] = pdf["policy_id"].apply(lambda x: abs(hash(x)) % 100)
+train_pdf = pdf[pdf["split_hash"] < 80].copy()
+test_pdf = pdf[pdf["split_hash"] >= 80].copy()
 
-print(f"Train: {train_df.count()}, Test: {test_df.count()}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Build pipeline: Gamma GLM (log link)
-
-# COMMAND ----------
-
-stages = []
-encoded_cols = []
-
-for cat_col in feature_cols_categorical:
-    indexer = StringIndexer(inputCol=cat_col, outputCol=f"{cat_col}_idx", handleInvalid="keep")
-    encoder = OneHotEncoder(inputCol=f"{cat_col}_idx", outputCol=f"{cat_col}_vec")
-    stages.extend([indexer, encoder])
-    encoded_cols.append(f"{cat_col}_vec")
-
-assembler = VectorAssembler(
-    inputCols=feature_cols_numeric + encoded_cols,
-    outputCol="features",
-    handleInvalid="skip",
-)
-stages.append(assembler)
-
-glm = GeneralizedLinearRegression(
-    featuresCol="features",
-    labelCol="avg_claim_severity",
-    predictionCol="predicted_severity",
-    family="gamma",
-    link="log",
-    maxIter=50,
-    regParam=0.01,
-)
-stages.append(glm)
-
-pipeline = Pipeline(stages=stages)
+print(f"Train: {len(train_pdf)}, Test: {len(test_pdf)}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Train and evaluate
+# MAGIC ## Train Gamma GLM
 
 # COMMAND ----------
+
+X_train = sm.add_constant(train_pdf[feature_cols].values)
+X_test = sm.add_constant(test_pdf[feature_cols].values)
+y_train = train_pdf["avg_claim_severity"].values
+y_test = test_pdf["avg_claim_severity"].values
 
 with mlflow.start_run(run_name="glm_severity_gamma") as run:
     mlflow.log_param("model_type", "GLM_Gamma")
-    mlflow.log_param("family", "gamma")
+    mlflow.log_param("family", "Gamma")
     mlflow.log_param("link", "log")
-    mlflow.log_param("features_numeric", len(feature_cols_numeric))
-    mlflow.log_param("features_categorical", len(feature_cols_categorical))
-    mlflow.log_param("reg_param", 0.01)
+    mlflow.log_param("features", len(feature_cols))
     mlflow.log_param("upt_table", f"{fqn}.unified_pricing_table_live")
-    mlflow.log_param("train_rows", train_df.count())
-    mlflow.log_param("test_rows", test_df.count())
-    mlflow.log_param("target_filter", "claim_count_5y > 0 AND total_incurred_5y > 0")
+    mlflow.log_param("train_rows", len(train_pdf))
+    mlflow.log_param("test_rows", len(test_pdf))
 
-    model = pipeline.fit(train_df)
-    predictions = model.transform(test_df)
+    glm = sm.GLM(y_train, X_train, family=sm.families.Gamma(link=sm.families.links.Log()))
+    result = glm.fit()
 
-    rmse = RegressionEvaluator(labelCol="avg_claim_severity", predictionCol="predicted_severity", metricName="rmse").evaluate(predictions)
-    mae = RegressionEvaluator(labelCol="avg_claim_severity", predictionCol="predicted_severity", metricName="mae").evaluate(predictions)
-    r2 = RegressionEvaluator(labelCol="avg_claim_severity", predictionCol="predicted_severity", metricName="r2").evaluate(predictions)
+    y_pred = result.predict(X_test)
+
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
 
     mlflow.log_metric("rmse", rmse)
     mlflow.log_metric("mae", mae)
     mlflow.log_metric("r2", r2)
+    mlflow.log_metric("aic", result.aic)
 
-    glm_model = model.stages[-1]
-    coefficients = glm_model.coefficients.toArray().tolist()
-    intercept = glm_model.intercept
-
-    mlflow.log_param("intercept", round(intercept, 6))
-    mlflow.log_param("num_coefficients", len(coefficients))
-
-    mlflow.spark.log_model(model, "glm_severity_model")
+    summary_text = str(result.summary())
+    with open("/tmp/glm_severity_summary.txt", "w") as f:
+        f.write(summary_text)
+    mlflow.log_artifact("/tmp/glm_severity_summary.txt")
 
     print(f"GLM Severity Results:")
     print(f"  RMSE: £{rmse:,.0f}")
     print(f"  MAE:  £{mae:,.0f}")
     print(f"  R2:   {r2:.4f}")
-    print(f"  Intercept: {intercept:.6f}")
+    print(f"  AIC:  {result.aic:.1f}")
     print(f"  MLflow Run ID: {run.info.run_id}")
 
 # COMMAND ----------
@@ -180,30 +133,17 @@ with mlflow.start_run(run_name="glm_severity_gamma") as run:
 
 import math
 
+coef_names = ["intercept"] + feature_cols
 relativities = []
-for i, name in enumerate(feature_cols_numeric):
-    if i < len(coefficients):
-        coef = coefficients[i]
-        relativity = math.exp(coef)
-        relativities.append({"feature": name, "coefficient": round(coef, 6), "relativity": round(relativity, 4)})
+for i, name in enumerate(coef_names):
+    coef = result.params[i]
+    pval = result.pvalues[i]
+    relativities.append({
+        "feature": name,
+        "coefficient": round(float(coef), 6),
+        "relativity": round(math.exp(coef), 4),
+        "p_value": round(float(pval), 4),
+        "significant": "Yes" if pval < 0.05 else "No",
+    })
 
-rel_df = spark.createDataFrame(relativities)
-display(rel_df.orderBy(F.abs(col("coefficient")).desc()))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Burning Cost: Frequency × Severity
-# MAGIC Combine both GLMs to compute the technical price per policy.
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC *Note: The burning cost combination will be done in a separate scoring notebook
-# MAGIC once both GLMs are registered in Unity Catalog.*
-
-display(predictions.select("policy_id", "avg_claim_severity", "predicted_severity",
-                           "sum_insured", "construction_type", "industry_risk_tier")
-        .withColumn("severity_ratio", F.round(col("predicted_severity") / col("avg_claim_severity"), 3))
-        .orderBy(col("predicted_severity").desc())
-        .limit(50))
+display(spark.createDataFrame(relativities).orderBy("p_value"))
