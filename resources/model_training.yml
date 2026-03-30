@@ -1,0 +1,59 @@
+# Model Training Job — trains all 4 pricing models from the Unified Pricing Table
+#
+# DAG:
+#   glm_frequency ──┬──→ gbm_risk_uplift (needs GLM predictions for residuals)
+#   glm_severity  ──╯
+#   gbm_demand    ────→ (independent, runs in parallel with GLMs)
+
+resources:
+  jobs:
+    train_pricing_models:
+      name: "Train Pricing Models"
+      parameters:
+        - name: catalog_name
+          default: ${var.catalog_name}
+        - name: schema_name
+          default: ${var.schema_name}
+
+      tasks:
+        # Step 1: GLMs run in parallel
+        - task_key: glm_frequency
+          notebook_task:
+            notebook_path: ../src/04_models/model_01_glm_frequency.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
+        - task_key: glm_severity
+          notebook_task:
+            notebook_path: ../src/04_models/model_02_glm_severity.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
+        # Step 2: GBM demand runs in parallel with GLMs (independent)
+        - task_key: gbm_demand
+          notebook_task:
+            notebook_path: ../src/04_models/model_03_gbm_demand.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
+        # Step 3: Risk uplift runs after frequency GLM (needs residuals)
+        - task_key: gbm_risk_uplift
+          depends_on:
+            - task_key: glm_frequency
+          notebook_task:
+            notebook_path: ../src/04_models/model_04_gbm_risk_uplift.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
