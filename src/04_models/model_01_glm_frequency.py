@@ -31,12 +31,11 @@ from pyspark.ml import Pipeline
 from pyspark.ml.evaluation import RegressionEvaluator
 
 mlflow.set_registry_uri("databricks-uc")
-experiment_name = f"/Users/{spark.conf.get('spark.databricks.clusterUsageTags.clusterOwnerOrgId', 'default')}/pricing_upt_frequency_glm"
-
 try:
-    mlflow.set_experiment(experiment_name)
+    user = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+    mlflow.set_experiment(f"/Workspace/Users/{user}/pricing_upt_frequency_glm")
 except Exception:
-    mlflow.set_experiment(f"/Workspace/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/pricing_upt_frequency_glm")
+    pass
 
 # COMMAND ----------
 

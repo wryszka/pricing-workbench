@@ -57,3 +57,5 @@ resources:
         - environment_key: default
           spec:
             client: "1"
+            dependencies:
+              - mlflow

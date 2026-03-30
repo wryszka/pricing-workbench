@@ -32,7 +32,8 @@ from pyspark.ml.evaluation import RegressionEvaluator
 
 mlflow.set_registry_uri("databricks-uc")
 try:
-    mlflow.set_experiment(f"/Workspace/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/pricing_upt_severity_glm")
+    user = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+    mlflow.set_experiment(f"/Workspace/Users/{user}/pricing_upt_severity_glm")
 except Exception:
     pass
 

@@ -7,7 +7,7 @@
 # MAGIC overlay — understanding price elasticity and demand curves.
 # MAGIC
 # MAGIC **Target:** `converted` (binary: 1=bound, 0=declined)
-# MAGIC **Method:** Databricks AutoML (selects best from XGBoost/LightGBM)
+# MAGIC **Method:** SparkML GBTClassifier
 # MAGIC **Data source:** Quote history joined with UPT features
 
 # COMMAND ----------
@@ -27,7 +27,8 @@ from pyspark.sql.functions import col, when, lit
 
 mlflow.set_registry_uri("databricks-uc")
 try:
-    mlflow.set_experiment(f"/Workspace/Users/{dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()}/pricing_upt_demand_gbm")
+    user = dbutils.notebook.entry_point.getDbutils().notebook().getContext().userName().get()
+    mlflow.set_experiment(f"/Workspace/Users/{user}/pricing_upt_demand_gbm")
 except Exception:
     pass
 
@@ -113,94 +114,108 @@ print(f"Train: {train_df.count()}, Test: {test_df.count()}")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Train with Databricks AutoML
+# MAGIC ## Build pipeline: StringIndexer + Assembler + GBTClassifier
 
 # COMMAND ----------
 
-from databricks import automl
+from pyspark.ml.feature import VectorAssembler, StringIndexer, OneHotEncoder
+from pyspark.ml.classification import GBTClassifier
+from pyspark.ml import Pipeline
+from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
 
-summary = automl.classify(
-    dataset=train_df,
-    target_col="converted_flag",
-    exclude_cols=["quote_id", "split_hash"],
-    primary_metric="roc_auc",
-    timeout_minutes=15,
-    max_trials=20,
+# Encode categoricals
+stages = []
+encoded_cols = []
+for cat_col in ["sic_code", "location_risk_tier"]:
+    indexer = StringIndexer(inputCol=cat_col, outputCol=f"{cat_col}_idx", handleInvalid="keep")
+    encoder = OneHotEncoder(inputCol=f"{cat_col}_idx", outputCol=f"{cat_col}_vec")
+    stages.extend([indexer, encoder])
+    encoded_cols.append(f"{cat_col}_vec")
+
+assembler = VectorAssembler(
+    inputCols=feature_cols + encoded_cols,
+    outputCol="features",
+    handleInvalid="skip",
 )
+stages.append(assembler)
 
-print(f"Best model: {summary.best_trial.model_description}")
-print(f"Best ROC AUC: {summary.best_trial.metrics['test_roc_auc']:.4f}")
+gbt = GBTClassifier(
+    featuresCol="features",
+    labelCol="converted_flag",
+    predictionCol="predicted_conversion",
+    maxDepth=5,
+    maxIter=80,
+    stepSize=0.1,
+    subsamplingRate=0.8,
+)
+stages.append(gbt)
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Evaluate best model on held-out test set
-
-# COMMAND ----------
-
-import mlflow.pyfunc
-
-best_model = mlflow.pyfunc.load_model(f"runs:/{summary.best_trial.mlflow_run_id}/model")
-
-# Convert test to pandas for sklearn-based model
-test_pdf = test_df.toPandas()
-feature_cols_for_pred = [c for c in test_pdf.columns if c not in ["quote_id", "converted_flag", "split_hash"]]
-test_pdf["predicted_conversion"] = best_model.predict(test_pdf[feature_cols_for_pred])
-
-# Calculate test metrics
-from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
-
-y_true = test_pdf["converted_flag"]
-y_pred = test_pdf["predicted_conversion"]
-
-roc_auc = roc_auc_score(y_true, y_pred)
-accuracy = accuracy_score(y_true, y_pred.round())
-precision = precision_score(y_true, y_pred.round(), zero_division=0)
-recall = recall_score(y_true, y_pred.round(), zero_division=0)
-
-print(f"Test Set Results:")
-print(f"  ROC AUC:   {roc_auc:.4f}")
-print(f"  Accuracy:  {accuracy:.4f}")
-print(f"  Precision: {precision:.4f}")
-print(f"  Recall:    {recall:.4f}")
-
-# Log test metrics to the best run
-with mlflow.start_run(run_id=summary.best_trial.mlflow_run_id):
-    mlflow.log_metric("holdout_roc_auc", roc_auc)
-    mlflow.log_metric("holdout_accuracy", accuracy)
-    mlflow.log_metric("holdout_precision", precision)
-    mlflow.log_metric("holdout_recall", recall)
+pipeline = Pipeline(stages=stages)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Feature Importance (SHAP)
+# MAGIC ## Train and evaluate
 
 # COMMAND ----------
 
-try:
-    import shap
-    import matplotlib.pyplot as plt
+with mlflow.start_run(run_name="gbt_demand_conversion") as run:
+    mlflow.log_param("model_type", "GBTClassifier")
+    mlflow.log_param("max_depth", 5)
+    mlflow.log_param("max_iter", 80)
+    mlflow.log_param("step_size", 0.1)
+    mlflow.log_param("features_numeric", len(feature_cols))
+    mlflow.log_param("features_categorical", 2)
+    mlflow.log_param("upt_table", f"{fqn}.unified_pricing_table_live")
+    mlflow.log_param("train_rows", train_df.count())
+    mlflow.log_param("test_rows", test_df.count())
 
-    # Get the underlying sklearn model
-    sklearn_model = best_model._model_impl.python_model
-    if hasattr(sklearn_model, "predict_proba"):
-        explainer = shap.TreeExplainer(sklearn_model)
-        sample = test_pdf[feature_cols_for_pred].sample(min(500, len(test_pdf)), random_state=42)
-        shap_values = explainer.shap_values(sample)
+    model = pipeline.fit(train_df)
+    predictions = model.transform(test_df)
 
-        fig, ax = plt.subplots(figsize=(10, 8))
-        shap.summary_plot(shap_values, sample, show=False, max_display=15)
-        plt.tight_layout()
+    # Metrics
+    auc_eval = BinaryClassificationEvaluator(labelCol="converted_flag", rawPredictionCol="rawPrediction", metricName="areaUnderROC")
+    acc_eval = MulticlassClassificationEvaluator(labelCol="converted_flag", predictionCol="predicted_conversion", metricName="accuracy")
+    prec_eval = MulticlassClassificationEvaluator(labelCol="converted_flag", predictionCol="predicted_conversion", metricName="weightedPrecision")
+    recall_eval = MulticlassClassificationEvaluator(labelCol="converted_flag", predictionCol="predicted_conversion", metricName="weightedRecall")
 
-        with mlflow.start_run(run_id=summary.best_trial.mlflow_run_id):
-            mlflow.log_figure(fig, "shap_summary.png")
-        plt.show()
-        print("SHAP values logged to MLflow")
-    else:
-        print("Model doesn't support SHAP TreeExplainer — skipping")
-except Exception as e:
-    print(f"SHAP analysis skipped: {e}")
+    roc_auc = auc_eval.evaluate(predictions)
+    accuracy = acc_eval.evaluate(predictions)
+    precision = prec_eval.evaluate(predictions)
+    recall = recall_eval.evaluate(predictions)
+
+    mlflow.log_metric("roc_auc", roc_auc)
+    mlflow.log_metric("accuracy", accuracy)
+    mlflow.log_metric("precision", precision)
+    mlflow.log_metric("recall", recall)
+
+    mlflow.spark.log_model(model, "gbt_demand_model")
+
+    print(f"GBT Demand/Conversion Results:")
+    print(f"  ROC AUC:   {roc_auc:.4f}")
+    print(f"  Accuracy:  {accuracy:.4f}")
+    print(f"  Precision: {precision:.4f}")
+    print(f"  Recall:    {recall:.4f}")
+    print(f"  MLflow Run ID: {run.info.run_id}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Feature Importance
+
+# COMMAND ----------
+
+gbt_model = model.stages[-1]
+importances = gbt_model.featureImportances.toArray()
+all_feature_names = feature_cols + [f"{c}_vec" for c in ["sic_code", "location_risk_tier"]]
+
+importance_data = []
+for i, imp in enumerate(importances):
+    if i < len(all_feature_names) and imp > 0.005:
+        importance_data.append({"feature": all_feature_names[i], "importance": round(float(imp), 4)})
+
+imp_df = spark.createDataFrame(importance_data)
+display(imp_df.orderBy(col("importance").desc()))
 
 # COMMAND ----------
 
@@ -211,7 +226,7 @@ except Exception as e:
 # COMMAND ----------
 
 display(
-    spark.createDataFrame(test_pdf[["quote_to_market_ratio", "converted_flag", "predicted_conversion"]])
+    predictions
     .withColumn("price_bucket", F.round(col("quote_to_market_ratio"), 1))
     .filter(col("price_bucket").between(0.3, 3.0))
     .groupBy("price_bucket")
