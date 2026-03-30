@@ -1,0 +1,25 @@
+# Gold BBT Build Job — merges all sources into the Big Beautiful Table
+
+resources:
+  jobs:
+    build_bbt:
+      name: "Build Big Beautiful Table (Gold)"
+      parameters:
+        - name: catalog_name
+          default: ${var.catalog_name}
+        - name: schema_name
+          default: ${var.schema_name}
+
+      tasks:
+        - task_key: build_bbt
+          notebook_task:
+            notebook_path: ../src/03_gold/build_bbt.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
