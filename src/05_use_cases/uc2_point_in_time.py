@@ -106,17 +106,17 @@ for feat in drift_features:
     live_mean = live_stats[feat]["mean"]
     frozen_mean = frozen_stats[feat]["mean"]
     if live_mean and frozen_mean and frozen_mean != 0:
-        drift_pct = (live_mean - frozen_mean) / abs(frozen_mean) * 100
+        drift_pct = float((live_mean - frozen_mean) / abs(frozen_mean) * 100)
     else:
-        drift_pct = 0
+        drift_pct = 0.0
 
     drift_rows.append({
         "feature": feat,
-        "frozen_mean": round(frozen_mean, 2) if frozen_mean else None,
-        "live_mean": round(live_mean, 2) if live_mean else None,
-        "drift_pct": round(drift_pct, 2),
-        "frozen_null_pct": round(frozen_stats[feat]["null_pct"], 1) if frozen_stats[feat]["null_pct"] else 0,
-        "live_null_pct": round(live_stats[feat]["null_pct"], 1) if live_stats[feat]["null_pct"] else 0,
+        "frozen_mean": float(round(frozen_mean, 2)) if frozen_mean else None,
+        "live_mean": float(round(live_mean, 2)) if live_mean else None,
+        "drift_pct": float(round(drift_pct, 2)),
+        "frozen_null_pct": float(round(frozen_stats[feat]["null_pct"], 1)) if frozen_stats[feat]["null_pct"] else 0.0,
+        "live_null_pct": float(round(live_stats[feat]["null_pct"], 1)) if live_stats[feat]["null_pct"] else 0.0,
         "drift_severity": "HIGH" if abs(drift_pct) > 10 else ("MEDIUM" if abs(drift_pct) > 5 else "LOW"),
     })
 
