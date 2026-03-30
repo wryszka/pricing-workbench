@@ -1,5 +1,5 @@
 bundle:
-  name: pricing-bbt-demo
+  name: pricing-upt-demo
 
 variables:
   catalog_name:
@@ -7,7 +7,7 @@ variables:
     default: lr_serverless_aws_us_catalog
   schema_name:
     description: Schema name for all demo tables
-    default: pricing_bbt
+    default: pricing_upt
   volume_name:
     description: Volume for landing external data files
     default: external_landing

@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Gold: Build the Big Beautiful Table (BBT)
+# MAGIC # Gold: Build the Unified Pricing Table (UPT)
 # MAGIC
 # MAGIC Merges all internal and external silver-layer data into a single wide
 # MAGIC denormalized table for pricing model training.
@@ -9,12 +9,12 @@
 # MAGIC - Internal: `internal_commercial_policies`, `internal_claims_history`, `internal_quote_history`
 # MAGIC - External (silver): `silver_market_pricing_benchmark`, `silver_geospatial_hazard_enrichment`, `silver_credit_bureau_summary`
 # MAGIC
-# MAGIC **Output:** `commercial_bbt_live` — the Big Beautiful Table
+# MAGIC **Output:** `unified_pricing_table_live` — the Unified Pricing Table
 
 # COMMAND ----------
 
 dbutils.widgets.text("catalog_name", "lr_serverless_aws_us_catalog")
-dbutils.widgets.text("schema_name", "pricing_bbt")
+dbutils.widgets.text("schema_name", "pricing_upt")
 
 catalog = dbutils.widgets.get("catalog_name")
 schema = dbutils.widgets.get("schema_name")
@@ -155,7 +155,7 @@ sic_df = spark.createDataFrame(sic_rows, ["sic_code", "industry_risk_tier"])
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 6: Join everything into the BBT
+# MAGIC ## Step 6: Join everything into the Unified Pricing Table
 
 # COMMAND ----------
 
@@ -164,7 +164,7 @@ policies_enriched = (policies_with_region
     .withColumn("market_join_key", F.concat(col("sic_code"), lit("_"), col("region")))
 )
 
-bbt = (policies_enriched
+upt =(policies_enriched
     # Claims aggregation
     .join(claims_agg, "policy_id", "left")
     # Quote aggregation
@@ -197,14 +197,14 @@ bbt = (policies_enriched
     .drop("postcode_prefix", "market_join_key", "match_key_sic_region")
 )
 
-print(f"BBT columns: {len(bbt.columns)}")
-bbt.printSchema()
+print(f"UPT columns: {len(upt.columns)}")
+upt.printSchema()
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Step 7: Generate synthetic/derived features
-# MAGIC These simulate the 200+ bureau and geo proxy columns that would exist in a real BBT.
+# MAGIC These simulate the 200+ bureau and geo proxy columns that would exist in a real UPT.
 
 # COMMAND ----------
 
@@ -272,17 +272,17 @@ geo_features = {
 # Apply synthetic features
 for feat_name, (min_v, max_v) in bureau_features.items():
     if isinstance(min_v, float) or isinstance(max_v, float):
-        bbt = bbt.withColumn(feat_name, deterministic_hash_double(col("policy_id"), feat_name, min_v, max_v))
+        upt =upt.withColumn(feat_name, deterministic_hash_double(col("policy_id"), feat_name, min_v, max_v))
     else:
-        bbt = bbt.withColumn(feat_name, deterministic_hash(col("policy_id"), feat_name, min_v, max_v))
+        upt =upt.withColumn(feat_name, deterministic_hash(col("policy_id"), feat_name, min_v, max_v))
 
 for feat_name, (min_v, max_v) in geo_features.items():
     if isinstance(min_v, float) or isinstance(max_v, float):
-        bbt = bbt.withColumn(feat_name, deterministic_hash_double(col("postcode_sector"), feat_name, min_v, max_v))
+        upt =upt.withColumn(feat_name, deterministic_hash_double(col("postcode_sector"), feat_name, min_v, max_v))
     else:
-        bbt = bbt.withColumn(feat_name, deterministic_hash(col("postcode_sector"), feat_name, min_v, max_v))
+        upt =upt.withColumn(feat_name, deterministic_hash(col("postcode_sector"), feat_name, min_v, max_v))
 
-print(f"BBT columns after synthetic expansion: {len(bbt.columns)}")
+print(f"UPT columns after synthetic expansion: {len(upt.columns)}")
 
 # COMMAND ----------
 
@@ -291,7 +291,7 @@ print(f"BBT columns after synthetic expansion: {len(bbt.columns)}")
 
 # COMMAND ----------
 
-bbt = (bbt
+upt = (upt
     # Loss ratio proxy
     .withColumn("loss_ratio_5y",
         spark_round(
@@ -326,26 +326,26 @@ bbt = (bbt
              .otherwise(1.0) * 0.15),
             2))
     # Audit metadata
-    .withColumn("last_updated_by", lit("system_bbt_builder"))
+    .withColumn("last_updated_by", lit("system_upt_builder"))
     .withColumn("approval_timestamp", F.current_timestamp())
     .withColumn("source_version", lit("v1.0"))
-    .withColumn("bbt_build_timestamp", F.current_timestamp())
+    .withColumn("upt_build_timestamp", F.current_timestamp())
 )
 
-print(f"Final BBT columns: {len(bbt.columns)}")
+print(f"Final UPT columns: {len(upt.columns)}")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 9: Write the BBT
+# MAGIC ## Step 9: Write the Unified Pricing Table
 
 # COMMAND ----------
 
-bbt.write.mode("overwrite").saveAsTable(f"{fqn}.commercial_bbt_live")
+upt.write.mode("overwrite").saveAsTable(f"{fqn}.unified_pricing_table_live")
 
-row_count = spark.table(f"{fqn}.commercial_bbt_live").count()
-col_count = len(spark.table(f"{fqn}.commercial_bbt_live").columns)
-print(f"✓ {fqn}.commercial_bbt_live — {row_count:,} rows × {col_count} columns")
+row_count = spark.table(f"{fqn}.unified_pricing_table_live").count()
+col_count = len(spark.table(f"{fqn}.unified_pricing_table_live").columns)
+print(f"✓ {fqn}.unified_pricing_table_live — {row_count:,} rows × {col_count} columns")
 
 # COMMAND ----------
 
@@ -357,9 +357,9 @@ print(f"✓ {fqn}.commercial_bbt_live — {row_count:,} rows × {col_count} colu
 from datetime import datetime
 
 snapshot_suffix = datetime.now().strftime("%Y_%m")
-snapshot_table = f"{fqn}.commercial_bbt_{snapshot_suffix}"
+snapshot_table = f"{fqn}.unified_pricing_table_{snapshot_suffix}"
 
-spark.sql(f"CREATE TABLE IF NOT EXISTS {snapshot_table} DEEP CLONE {fqn}.commercial_bbt_live")
+spark.sql(f"CREATE TABLE IF NOT EXISTS {snapshot_table} DEEP CLONE {fqn}.unified_pricing_table_live")
 print(f"✓ Snapshot: {snapshot_table}")
 
 # COMMAND ----------
@@ -378,5 +378,5 @@ display(spark.sql(f"""
         avg(current_premium) as avg_premium,
         avg(loss_ratio_5y) as avg_loss_ratio,
         avg(combined_risk_score) as avg_risk_score
-    FROM {fqn}.commercial_bbt_live
+    FROM {fqn}.unified_pricing_table_live
 """))

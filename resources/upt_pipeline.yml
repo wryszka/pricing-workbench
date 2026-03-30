@@ -1,9 +1,9 @@
-# Gold BBT Build Job — merges all sources into the Big Beautiful Table
+# Gold UPT Build Job — merges all sources into the Unified Pricing Table
 
 resources:
   jobs:
-    build_bbt:
-      name: "Build Big Beautiful Table (Gold)"
+    build_upt:
+      name: "Build Unified Pricing Table (Gold)"
       parameters:
         - name: catalog_name
           default: ${var.catalog_name}
@@ -11,9 +11,9 @@ resources:
           default: ${var.schema_name}
 
       tasks:
-        - task_key: build_bbt
+        - task_key: build_upt
           notebook_task:
-            notebook_path: ../src/03_gold/build_bbt.py
+            notebook_path: ../src/03_gold/build_upt.py
             base_parameters:
               catalog_name: ${var.catalog_name}
               schema_name: ${var.schema_name}

@@ -3,7 +3,7 @@
 resources:
   jobs:
     setup_demo:
-      name: "Setup — Pricing BBT Demo"
+      name: "Setup — Pricing UPT Demo"
       parameters:
         - name: catalog_name
           default: ${var.catalog_name}

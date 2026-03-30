@@ -1,13 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Setup — Pricing BBT Demo
+# MAGIC # Setup — Pricing UPT Demo
 # MAGIC Creates the schema, volume, and "pre-existing" internal tables
 # MAGIC (policies, claims, quotes) that Bricksurance already has on their platform.
 
 # COMMAND ----------
 
 dbutils.widgets.text("catalog_name", "lr_serverless_aws_us_catalog")
-dbutils.widgets.text("schema_name", "pricing_bbt")
+dbutils.widgets.text("schema_name", "pricing_upt")
 dbutils.widgets.text("volume_name", "external_landing")
 
 catalog = dbutils.widgets.get("catalog_name")
