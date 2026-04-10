@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from server.audit import log_audit_event
+
 from server.config import fqn, get_current_user
 from server.sql import execute_query
 
@@ -207,7 +209,25 @@ async def decide_model(run_id: str, config_id: str, req: ModelDecisionRequest):
         )
     """)
 
-    # Audit log
+    # Unified audit log
+    await log_audit_event(
+        event_type=f"model_{req.decision.lower()}",
+        entity_type="model",
+        entity_id=config_id,
+        entity_version=run_id,
+        user_id=reviewer,
+        details={
+            "decision_id": decision_id,
+            "factory_run_id": run_id,
+            "mlflow_run_id": lb[0].get("mlflow_run_id", ""),
+            "composite_score": lb[0].get("composite_score", ""),
+            "decision": req.decision,
+            "reviewer_notes": req.reviewer_notes,
+            "conditions": req.conditions,
+        },
+    )
+
+    # Legacy model-factory audit log (for backward compat with mf_audit_log table)
     import json, uuid
     event = {
         "event_id": str(uuid.uuid4()),
@@ -230,7 +250,10 @@ async def decide_model(run_id: str, config_id: str, req: ModelDecisionRequest):
         "NULL" if v is None else f"'{str(v).replace(chr(39), chr(39)+chr(39))}'"
         for v in event.values()
     )
-    await execute_query(f"INSERT INTO {fqn('mf_audit_log')} ({cols}) VALUES ({vals})")
+    try:
+        await execute_query(f"INSERT INTO {fqn('mf_audit_log')} ({cols}) VALUES ({vals})")
+    except Exception:
+        logger.warning("Failed to write to legacy mf_audit_log — table may not exist yet")
 
     return {
         "decision_id": decision_id,

@@ -14,6 +14,8 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from server.audit import log_audit_event
+
 from server.config import fqn, get_current_user
 from server.sql import execute_query
 
@@ -515,6 +517,21 @@ async def approve_dataset(dataset_id: str, req: ApprovalRequest):
             {raw_count - silver_count}
         )
     """)
+
+    await log_audit_event(
+        event_type=f"dataset_{req.decision}",
+        entity_type="dataset",
+        entity_id=dataset_id,
+        entity_version=approval_id,
+        user_id=reviewer,
+        details={
+            "approval_id": approval_id,
+            "raw_row_count": raw_count,
+            "silver_row_count": silver_count,
+            "rows_dropped_by_dq": raw_count - silver_count,
+            "reviewer_notes": req.reviewer_notes,
+        },
+    )
 
     return {
         "approval_id": approval_id,

@@ -29,6 +29,30 @@ spark.sql(f"CREATE VOLUME IF NOT EXISTS {fqn}.{volume}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Audit log table
+# MAGIC Unified audit trail for all governance events across the demo.
+
+# COMMAND ----------
+
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS {fqn}.audit_log (
+        event_id        STRING      COMMENT 'UUID for the event',
+        event_type      STRING      COMMENT 'dataset_approved, model_rejected, manual_upload, etc.',
+        entity_type     STRING      COMMENT 'dataset, model, feature, endpoint',
+        entity_id       STRING      COMMENT 'Identifier of the entity acted upon',
+        entity_version  STRING      COMMENT 'Version or snapshot reference',
+        user_id         STRING      COMMENT 'Who triggered the event',
+        timestamp       TIMESTAMP   COMMENT 'When the event occurred (UTC)',
+        details         STRING      COMMENT 'JSON blob with flexible metadata',
+        source          STRING      COMMENT 'app, notebook, api'
+    )
+    COMMENT 'Unified audit trail for all pricing governance events'
+""")
+print(f"✓ {fqn}.audit_log")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Internal table 1: Commercial Policies
 # MAGIC These are policies already on the Databricks platform — the insurer's book of business.
 
