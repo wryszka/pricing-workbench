@@ -22,6 +22,27 @@ export const api = {
     }),
   getApprovalHistory: (id: string) => fetchJson<any[]>(`/datasets/${id}/approvals`),
 
+  // Download
+  downloadDataset: (id: string, layer: string = 'silver') =>
+    `${BASE}/datasets/${id}/download?layer=${layer}`,
+
+  // Upload
+  validateUpload: async (id: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${BASE}/datasets/${id}/upload/validate`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`Validation error: ${res.status}`);
+    return res.json();
+  },
+  confirmUpload: async (id: string, file: File, mode: string = 'replace') => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${BASE}/datasets/${id}/upload/confirm?mode=${mode}`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`Upload error: ${res.status}`);
+    return res.json();
+  },
+  getUploadHistory: (id: string) => fetchJson<any[]>(`/datasets/${id}/uploads`),
+
   // Model Factory routes
   getFactoryRuns: () => fetchJson<any[]>('/models/runs'),
   getLeaderboard: (runId: string) => fetchJson<any[]>(`/models/runs/${runId}/leaderboard`),

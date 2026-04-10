@@ -6,17 +6,22 @@ Provides endpoints for:
 3. Impact analytics (pricing impact simulation)
 4. Data quality expectations and freshness
 5. Approve/reject workflow
+6. Manual CSV download and upload with audit trail
 """
 
+import csv
+import hashlib
+import io
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from server.audit import log_audit_event
 
-from server.config import fqn, get_current_user
+from server.config import fqn, get_current_user, get_catalog, get_schema
 from server.sql import execute_query
 
 logger = logging.getLogger(__name__)
@@ -31,6 +36,7 @@ EXTERNAL_DATASETS = {
         "raw_table": "raw_market_pricing_benchmark",
         "silver_table": "silver_market_pricing_benchmark",
         "description": "Aggregated competitor pricing data by industry and region",
+        "expected_columns": ["match_key_sic_region", "market_median_rate", "competitor_a_min_premium", "price_index_trend"],
     },
     "geospatial_hazard_enrichment": {
         "display_name": "Geospatial Hazard Enrichment",
@@ -39,6 +45,7 @@ EXTERNAL_DATASETS = {
         "raw_table": "raw_geospatial_hazard_enrichment",
         "silver_table": "silver_geospatial_hazard_enrichment",
         "description": "Location-based risk scores: flood, fire, crime, subsidence",
+        "expected_columns": ["postcode_sector", "flood_zone_rating", "proximity_to_fire_station_km", "crime_theft_index", "subsidence_risk"],
     },
     "credit_bureau_summary": {
         "display_name": "Credit Bureau Summary",
@@ -47,6 +54,7 @@ EXTERNAL_DATASETS = {
         "raw_table": "raw_credit_bureau_summary",
         "silver_table": "silver_credit_bureau_summary",
         "description": "Company financial health: credit score, CCJs, years trading",
+        "expected_columns": ["company_id", "policy_id", "credit_score", "ccj_count", "years_trading", "director_changes"],
     },
 }
 
@@ -589,3 +597,220 @@ async def get_approval_history(dataset_id: str):
         history = []
 
     return history
+
+
+# ---------------------------------------------------------------------------
+# 6. Download dataset as CSV
+# ---------------------------------------------------------------------------
+
+@router.get("/{dataset_id}/download")
+async def download_dataset(dataset_id: str, layer: str = Query("silver", enum=["raw", "silver"])):
+    """Export the current dataset version as CSV. Logs a manual_download audit event."""
+    if dataset_id not in EXTERNAL_DATASETS:
+        raise HTTPException(404, f"Unknown dataset: {dataset_id}")
+
+    ds = EXTERNAL_DATASETS[dataset_id]
+    table = fqn(ds["raw_table"] if layer == "raw" else ds["silver_table"])
+
+    rows = await execute_query(f"SELECT * FROM {table}")
+    if not rows:
+        raise HTTPException(404, "No data found in table")
+
+    # Build CSV in memory
+    output = io.StringIO()
+    # Filter out metadata columns for a clean export
+    all_cols = list(rows[0].keys())
+    cols = [c for c in all_cols if not c.startswith("_")]
+    writer = csv.DictWriter(output, fieldnames=cols, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({c: row.get(c) for c in cols})
+
+    csv_bytes = output.getvalue().encode("utf-8")
+    filename = f"{dataset_id}_{layer}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    await log_audit_event(
+        event_type="manual_download",
+        entity_type="dataset",
+        entity_id=dataset_id,
+        entity_version=layer,
+        details={
+            "layer": layer,
+            "table": table,
+            "row_count": len(rows),
+            "columns": cols,
+            "filename": filename,
+        },
+    )
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# 7. Upload CSV to bronze layer
+# ---------------------------------------------------------------------------
+
+@router.post("/{dataset_id}/upload/validate")
+async def validate_upload(dataset_id: str, file: UploadFile = File(...)):
+    """Validate an uploaded CSV against the expected schema. Returns a preview."""
+    if dataset_id not in EXTERNAL_DATASETS:
+        raise HTTPException(404, f"Unknown dataset: {dataset_id}")
+
+    ds = EXTERNAL_DATASETS[dataset_id]
+    expected_cols = ds["expected_columns"]
+
+    content = await file.read()
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "File is not valid UTF-8 text")
+
+    reader = csv.DictReader(io.StringIO(text))
+    csv_cols = reader.fieldnames or []
+
+    # Check columns match
+    missing = [c for c in expected_cols if c not in csv_cols]
+    extra = [c for c in csv_cols if c not in expected_cols]
+    columns_matched = len(missing) == 0
+
+    # Read all rows for count, preview first 20
+    all_rows = list(reader)
+    preview = all_rows[:20]
+
+    return {
+        "dataset_id": dataset_id,
+        "filename": file.filename,
+        "file_hash": file_hash,
+        "row_count": len(all_rows),
+        "csv_columns": csv_cols,
+        "expected_columns": expected_cols,
+        "missing_columns": missing,
+        "extra_columns": extra,
+        "columns_matched": columns_matched,
+        "preview": preview,
+        "valid": columns_matched and len(all_rows) > 0,
+    }
+
+
+@router.post("/{dataset_id}/upload/confirm")
+async def confirm_upload(
+    dataset_id: str,
+    file: UploadFile = File(...),
+    mode: str = Query("replace", enum=["replace", "append"]),
+):
+    """Write the uploaded CSV to the bronze table. Logs a manual_upload audit event."""
+    if dataset_id not in EXTERNAL_DATASETS:
+        raise HTTPException(404, f"Unknown dataset: {dataset_id}")
+
+    ds = EXTERNAL_DATASETS[dataset_id]
+    expected_cols = ds["expected_columns"]
+    raw_table = fqn(ds["raw_table"])
+
+    content = await file.read()
+    file_hash = hashlib.sha256(content).hexdigest()
+    text = content.decode("utf-8")
+
+    reader = csv.DictReader(io.StringIO(text))
+    csv_cols = reader.fieldnames or []
+    missing = [c for c in expected_cols if c not in csv_cols]
+
+    if missing:
+        raise HTTPException(400, f"Missing required columns: {missing}")
+
+    all_rows = list(reader)
+    if not all_rows:
+        raise HTTPException(400, "CSV file contains no data rows")
+
+    # Build INSERT statements in batches
+    write_mode = "OVERWRITE" if mode == "replace" else "INTO"
+    col_list = ", ".join(expected_cols)
+
+    # Write via INSERT with VALUES (batch of 100)
+    inserted = 0
+    batch_size = 100
+    for i in range(0, len(all_rows), batch_size):
+        batch = all_rows[i:i + batch_size]
+        values_list = []
+        for row in batch:
+            vals = []
+            for c in expected_cols:
+                v = row.get(c, "")
+                if v is None or v == "":
+                    vals.append("NULL")
+                else:
+                    vals.append(f"'{v.replace(chr(39), chr(39)+chr(39))}'")
+            values_list.append(f"({', '.join(vals)})")
+
+        values_sql = ",\n".join(values_list)
+        if inserted == 0 and mode == "replace":
+            # First batch: overwrite
+            await execute_query(f"""
+                INSERT OVERWRITE {raw_table} ({col_list}, _ingested_at, _source_file)
+                SELECT {col_list}, current_timestamp() as _ingested_at,
+                       'manual_upload:{file.filename}' as _source_file
+                FROM (VALUES {values_sql}) AS t({col_list})
+            """)
+        else:
+            await execute_query(f"""
+                INSERT INTO {raw_table} ({col_list}, _ingested_at, _source_file)
+                SELECT {col_list}, current_timestamp() as _ingested_at,
+                       'manual_upload:{file.filename}' as _source_file
+                FROM (VALUES {values_sql}) AS t({col_list})
+            """)
+        inserted += len(batch)
+
+    reviewer = get_current_user()
+    await log_audit_event(
+        event_type="manual_upload",
+        entity_type="dataset",
+        entity_id=dataset_id,
+        details={
+            "original_filename": file.filename,
+            "file_hash": file_hash,
+            "row_count": len(all_rows),
+            "columns_matched": True,
+            "upload_mode": mode,
+            "target_table": raw_table,
+        },
+    )
+
+    return {
+        "dataset_id": dataset_id,
+        "filename": file.filename,
+        "file_hash": file_hash,
+        "row_count": len(all_rows),
+        "mode": mode,
+        "target_table": raw_table,
+        "message": f"Uploaded {len(all_rows)} rows to {raw_table} ({mode} mode). "
+                   "Run the ingestion pipeline to promote to silver.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 8. Upload history (from audit_log)
+# ---------------------------------------------------------------------------
+
+@router.get("/{dataset_id}/uploads")
+async def get_upload_history(dataset_id: str):
+    """Get recent manual upload events for this dataset from the audit log."""
+    if dataset_id not in EXTERNAL_DATASETS:
+        raise HTTPException(404, f"Unknown dataset: {dataset_id}")
+
+    try:
+        uploads = await execute_query(f"""
+            SELECT event_id, event_type, user_id, timestamp, details, source
+            FROM {fqn('audit_log')}
+            WHERE event_type = 'manual_upload' AND entity_id = '{dataset_id}'
+            ORDER BY timestamp DESC
+            LIMIT 20
+        """)
+    except Exception:
+        uploads = []
+
+    return uploads
