@@ -358,6 +358,12 @@ print(f"✓ {table_name} — {row_count:,} rows × {col_count} columns")
 # COMMAND ----------
 
 # Primary key — makes UPT a feature table in UC
+# NOT NULL is required before PK can be added (overwrite recreates nullable columns)
+try:
+    spark.sql(f"ALTER TABLE {table_name} ALTER COLUMN policy_id SET NOT NULL")
+except Exception:
+    pass  # Already NOT NULL
+
 try:
     spark.sql(f"ALTER TABLE {table_name} ADD CONSTRAINT upt_pk PRIMARY KEY (policy_id)")
     print("✓ PRIMARY KEY constraint added (policy_id)")
