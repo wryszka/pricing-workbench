@@ -24,7 +24,9 @@ import mlflow.data
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
 
 mlflow.set_registry_uri("databricks-uc")
 try:
@@ -114,10 +116,10 @@ with mlflow.start_run(run_name="glm_frequency_poisson") as run:
     mlflow.set_tag("feature_table", upt_table_name)
 
     glm = sm.GLM(y_train, X_train, family=sm.families.Poisson(link=sm.families.links.Log()))
-    result = glm.fit()
+    glm_result = glm.fit()
 
     # Predict
-    y_pred = result.predict(X_test)
+    y_pred = glm_result.predict(X_test)
 
     # Metrics
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
@@ -127,21 +129,61 @@ with mlflow.start_run(run_name="glm_frequency_poisson") as run:
     mlflow.log_metric("rmse", rmse)
     mlflow.log_metric("mae", mae)
     mlflow.log_metric("r2", r2)
-    mlflow.log_metric("aic", result.aic)
-    mlflow.log_metric("bic", result.bic)
+    mlflow.log_metric("aic", glm_result.aic)
+    mlflow.log_metric("bic", glm_result.bic)
 
     # Log model summary as artifact
-    summary_text = str(result.summary())
+    summary_text = str(glm_result.summary())
     with open("/tmp/glm_frequency_summary.txt", "w") as f:
         f.write(summary_text)
     mlflow.log_artifact("/tmp/glm_frequency_summary.txt")
+
+    # Wrap statsmodels GLM in an sklearn-compatible estimator so fe.log_model() works
+    class PoissonGLMWrapper(BaseEstimator, RegressorMixin):
+        def __init__(self, glm_result, feature_names):
+            self.glm_result = glm_result
+            self.feature_names = feature_names
+        def predict(self, X):
+            X_with_const = sm.add_constant(X)
+            return self.glm_result.predict(X_with_const)
+        def fit(self, X, y):
+            return self
+
+    sklearn_model = PoissonGLMWrapper(glm_result, feature_cols)
+
+    # Log with FeatureEngineeringClient — this enables automatic feature lookup
+    # at serving time. The model only needs policy_id to make predictions.
+    fe = FeatureEngineeringClient()
+    feature_lookups = [
+        FeatureLookup(
+            table_name=upt_table_name,
+            feature_names=feature_cols,
+            lookup_key="policy_id",
+        )
+    ]
+
+    # Create a training set reference for fe.log_model
+    training_set = fe.create_training_set(
+        df=spark.createDataFrame(train_pdf[["policy_id", "claim_frequency"]]),
+        feature_lookups=feature_lookups,
+        label="claim_frequency",
+    )
+
+    fe.log_model(
+        model=sklearn_model,
+        artifact_path="glm_frequency_model",
+        flavor=mlflow.sklearn,
+        training_set=training_set,
+        registered_model_name=f"{catalog}.{schema}.glm_frequency_model",
+    )
 
     print(f"GLM Frequency Results:")
     print(f"  RMSE: {rmse:.4f}")
     print(f"  MAE:  {mae:.4f}")
     print(f"  R2:   {r2:.4f}")
-    print(f"  AIC:  {result.aic:.1f}")
+    print(f"  AIC:  {glm_result.aic:.1f}")
     print(f"  MLflow Run ID: {run.info.run_id}")
+    print(f"  ✓ Logged with fe.log_model() — auto feature lookup enabled")
 
 # COMMAND ----------
 
@@ -154,8 +196,8 @@ with mlflow.start_run(run_name="glm_frequency_poisson") as run:
 import math
 
 coef_names = ["intercept"] + feature_cols
-coefficients = result.params
-pvalues = result.pvalues
+coefficients = glm_result.params
+pvalues = glm_result.pvalues
 
 relativities = []
 for i, name in enumerate(coef_names):

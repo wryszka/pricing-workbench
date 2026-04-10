@@ -27,6 +27,7 @@ from lightgbm import LGBMClassifier
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_score, recall_score
 import pyspark.sql.functions as F
 from pyspark.sql.functions import col, when
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
 
 mlflow.set_registry_uri("databricks-uc")
 try:
@@ -155,7 +156,35 @@ with mlflow.start_run(run_name="lgbm_demand_conversion") as run:
     mlflow.log_metric("accuracy", accuracy)
     mlflow.log_metric("precision", precision)
     mlflow.log_metric("recall", recall)
-    mlflow.sklearn.log_model(model, "lgbm_demand_model")
+
+    # Log with FeatureEngineeringClient for automatic feature lookup at serving time
+    # The demand model uses quote-level features enriched from the UPT,
+    # so we create lookups against both quote and UPT features
+    fe = FeatureEngineeringClient()
+    training_set = fe.create_training_set(
+        df=spark.createDataFrame(train_pdf[["quote_id", "converted_flag"]]),
+        feature_lookups=[FeatureLookup(
+            table_name=upt_table_name,
+            feature_names=[c for c in feature_cols if c in [
+                "flood_zone_rating", "crime_theft_index", "subsidence_risk",
+                "composite_location_risk", "market_median_rate",
+                "competitor_a_min_premium", "price_index_trend",
+                "credit_default_probability", "business_stability_score",
+                "population_density_per_km2", "distance_to_coast_km",
+            ]],
+            lookup_key="policy_id",
+        )],
+        label="converted_flag",
+        exclude_columns=["quote_id"],
+    )
+
+    fe.log_model(
+        model=model,
+        artifact_path="lgbm_demand_model",
+        flavor=mlflow.sklearn,
+        training_set=training_set,
+        registered_model_name=f"{catalog}.{schema}.lgbm_demand_model",
+    )
 
     print(f"LightGBM Demand Results:")
     print(f"  ROC AUC:   {roc_auc:.4f}")
@@ -163,6 +192,7 @@ with mlflow.start_run(run_name="lgbm_demand_conversion") as run:
     print(f"  Precision: {precision:.4f}")
     print(f"  Recall:    {recall:.4f}")
     print(f"  MLflow Run ID: {run.info.run_id}")
+    print(f"  ✓ Logged with fe.log_model() — auto feature lookup enabled")
 
 # COMMAND ----------
 

@@ -1,4 +1,4 @@
-# Online Feature Store — setup and test jobs
+# Online Feature Store + Model Serving — setup, deploy, and test jobs
 
 resources:
   jobs:
@@ -40,3 +40,42 @@ resources:
             dependencies:
               - databricks-feature-engineering
               - databricks-sdk
+
+    deploy_model_endpoint:
+      name: "Deploy Model Serving Endpoint"
+      parameters:
+        - name: catalog_name
+          default: ${var.catalog_name}
+        - name: schema_name
+          default: ${var.schema_name}
+        - name: endpoint_name
+          default: "pricing-frequency-endpoint"
+
+      tasks:
+        - task_key: deploy
+          notebook_task:
+            notebook_path: ../src/07_serving/deploy_model_endpoint.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+              endpoint_name: "pricing-frequency-endpoint"
+          environment_key: default
+
+        - task_key: test_endpoint
+          depends_on:
+            - task_key: deploy
+          notebook_task:
+            notebook_path: ../src/07_serving/test_endpoint.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+              endpoint_name: "pricing-frequency-endpoint"
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "5"
+            dependencies:
+              - databricks-sdk
+              - mlflow

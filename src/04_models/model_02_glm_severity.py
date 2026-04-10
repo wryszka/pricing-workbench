@@ -25,7 +25,9 @@ import mlflow.data
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
 
 mlflow.set_registry_uri("databricks-uc")
 try:
@@ -113,9 +115,9 @@ with mlflow.start_run(run_name="glm_severity_gamma") as run:
     mlflow.log_param("test_rows", len(test_pdf))
 
     glm = sm.GLM(y_train, X_train, family=sm.families.Gamma(link=sm.families.links.Log()))
-    result = glm.fit()
+    glm_result = glm.fit()
 
-    y_pred = result.predict(X_test)
+    y_pred = glm_result.predict(X_test)
 
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     mae = mean_absolute_error(y_test, y_pred)
@@ -124,19 +126,51 @@ with mlflow.start_run(run_name="glm_severity_gamma") as run:
     mlflow.log_metric("rmse", rmse)
     mlflow.log_metric("mae", mae)
     mlflow.log_metric("r2", r2)
-    mlflow.log_metric("aic", result.aic)
+    mlflow.log_metric("aic", glm_result.aic)
 
-    summary_text = str(result.summary())
+    summary_text = str(glm_result.summary())
     with open("/tmp/glm_severity_summary.txt", "w") as f:
         f.write(summary_text)
     mlflow.log_artifact("/tmp/glm_severity_summary.txt")
+
+    # sklearn wrapper for fe.log_model()
+    class GammaGLMWrapper(BaseEstimator, RegressorMixin):
+        def __init__(self, glm_result, feature_names):
+            self.glm_result = glm_result
+            self.feature_names = feature_names
+        def predict(self, X):
+            return self.glm_result.predict(sm.add_constant(X))
+        def fit(self, X, y):
+            return self
+
+    sklearn_model = GammaGLMWrapper(glm_result, feature_cols)
+
+    fe = FeatureEngineeringClient()
+    training_set = fe.create_training_set(
+        df=spark.createDataFrame(train_pdf[["policy_id", "avg_claim_severity"]]),
+        feature_lookups=[FeatureLookup(
+            table_name=upt_table_name,
+            feature_names=feature_cols,
+            lookup_key="policy_id",
+        )],
+        label="avg_claim_severity",
+    )
+
+    fe.log_model(
+        model=sklearn_model,
+        artifact_path="glm_severity_model",
+        flavor=mlflow.sklearn,
+        training_set=training_set,
+        registered_model_name=f"{catalog}.{schema}.glm_severity_model",
+    )
 
     print(f"GLM Severity Results:")
     print(f"  RMSE: £{rmse:,.0f}")
     print(f"  MAE:  £{mae:,.0f}")
     print(f"  R2:   {r2:.4f}")
-    print(f"  AIC:  {result.aic:.1f}")
+    print(f"  AIC:  {glm_result.aic:.1f}")
     print(f"  MLflow Run ID: {run.info.run_id}")
+    print(f"  ✓ Logged with fe.log_model() — auto feature lookup enabled")
 
 # COMMAND ----------
 
@@ -150,8 +184,8 @@ import math
 coef_names = ["intercept"] + feature_cols
 relativities = []
 for i, name in enumerate(coef_names):
-    coef = result.params[i]
-    pval = result.pvalues[i]
+    coef = glm_result.params[i]
+    pval = glm_result.pvalues[i]
     relativities.append({
         "feature": name,
         "coefficient": round(float(coef), 6),

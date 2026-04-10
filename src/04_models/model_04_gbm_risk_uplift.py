@@ -28,6 +28,7 @@ from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import pyspark.sql.functions as F
 from pyspark.sql.functions import col
+from databricks.feature_engineering import FeatureEngineeringClient, FeatureLookup
 
 mlflow.set_registry_uri("databricks-uc")
 try:
@@ -165,7 +166,25 @@ with mlflow.start_run(run_name="lgbm_risk_uplift") as run:
     mlflow.log_metric("combined_r2", combined_r2)
     mlflow.log_metric("rmse_improvement_pct", round(improvement_pct, 2))
 
-    mlflow.sklearn.log_model(gbm, "lgbm_uplift_model")
+    # Log with fe.log_model() for automatic feature lookup at serving time
+    fe = FeatureEngineeringClient()
+    training_set = fe.create_training_set(
+        df=spark.createDataFrame(train_pdf[["policy_id", "glm_residual"]]),
+        feature_lookups=[FeatureLookup(
+            table_name=upt_table_name,
+            feature_names=all_features,
+            lookup_key="policy_id",
+        )],
+        label="glm_residual",
+    )
+
+    fe.log_model(
+        model=gbm,
+        artifact_path="lgbm_uplift_model",
+        flavor=mlflow.sklearn,
+        training_set=training_set,
+        registered_model_name=f"{catalog}.{schema}.lgbm_uplift_model",
+    )
 
     print(f"Model Comparison:")
     print(f"  {'Model':<20} {'RMSE':>10} {'R2':>10}")

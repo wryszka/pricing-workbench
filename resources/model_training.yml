@@ -62,3 +62,4 @@ resources:
               - statsmodels
               - lightgbm
               - scikit-learn
+              - databricks-feature-engineering
