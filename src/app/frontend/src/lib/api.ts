@@ -63,4 +63,7 @@ export const api = {
   // Agent (optional AI assistant)
   getAgentStatus: () => fetchJson<any>('/agent/status'),
   runAgentAnalysis: () => fetchJson<any>('/agent/analyze', { method: 'POST' }),
+
+  // Feature Store
+  getFeatureStoreStatus: () => fetchJson<any>('/features/status'),
 };

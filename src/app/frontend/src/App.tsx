@@ -1,13 +1,15 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Database, Building2, FlaskConical } from 'lucide-react';
+import { Database, Building2, FlaskConical, Zap } from 'lucide-react';
 import DatasetList from './pages/DatasetList';
 import DatasetDetail from './pages/DatasetDetail';
 import ModelFactory from './pages/ModelFactory';
 import ModelFactoryRun from './pages/ModelFactoryRun';
+import FeatureStore from './pages/FeatureStore';
 
 function Nav() {
   const location = useLocation();
   const isModels = location.pathname.startsWith('/models');
+  const isFeatures = location.pathname.startsWith('/features');
 
   return (
     <header className="bg-[#1e293b] text-white">
@@ -24,7 +26,7 @@ function Nav() {
             <Link
               to="/"
               className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                !isModels ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'
+                !isModels && !isFeatures ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'
               }`}
             >
               <Database className="w-3.5 h-3.5 inline mr-1.5" />
@@ -38,6 +40,15 @@ function Nav() {
             >
               <FlaskConical className="w-3.5 h-3.5 inline mr-1.5" />
               Model Factory
+            </Link>
+            <Link
+              to="/features"
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                isFeatures ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5 inline mr-1.5" />
+              Feature Store
             </Link>
           </nav>
         </div>
@@ -61,6 +72,7 @@ export default function App() {
             <Route path="/dataset/:datasetId" element={<DatasetDetail />} />
             <Route path="/models" element={<ModelFactory />} />
             <Route path="/models/:runId" element={<ModelFactoryRun />} />
+            <Route path="/features" element={<FeatureStore />} />
           </Routes>
         </main>
       </div>

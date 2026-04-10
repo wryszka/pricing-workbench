@@ -1,0 +1,42 @@
+# Online Feature Store — setup and test jobs
+
+resources:
+  jobs:
+    setup_online_store:
+      name: "Setup Online Feature Store"
+      parameters:
+        - name: catalog_name
+          default: ${var.catalog_name}
+        - name: schema_name
+          default: ${var.schema_name}
+        - name: online_store_name
+          default: "pricing-upt-online-store"
+
+      tasks:
+        - task_key: setup_store
+          notebook_task:
+            notebook_path: ../src/07_serving/setup_online_store.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+              online_store_name: "pricing-upt-online-store"
+          environment_key: default
+
+        - task_key: test_lookup
+          depends_on:
+            - task_key: setup_store
+          notebook_task:
+            notebook_path: ../src/07_serving/test_online_lookup.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+              online_store_name: "pricing-upt-online-store"
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - databricks-feature-engineering
+              - databricks-sdk
