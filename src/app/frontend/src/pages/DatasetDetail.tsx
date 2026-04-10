@@ -179,90 +179,309 @@ function ImpactTab({ datasetId }: { datasetId: string }) {
   if (loading) return <Spinner />;
   if (!data) return <ErrorMsg msg="Failed to load impact analysis" />;
 
-  const portfolio = data.summary || data.portfolio || {};
+  const dd = data.data_diff || {};
+  const pi = data.portfolio_impact || {};
+  const rs = data.risk_summary || {};
 
   return (
-    <div className="space-y-6">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="font-semibold text-blue-800">{data.impact_type}</h3>
-        <p className="text-sm text-blue-600 mt-1">Simulated impact of this dataset on the current portfolio</p>
+    <div className="space-y-8">
+      {/* Header + download */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-gray-900">Shadow Pricing Impact Analysis</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Automatic re-rating of every affected policy using the current pricing model to show exact financial impact before approval.
+          </p>
+        </div>
+        <a href={api.downloadImpactReport(datasetId)}
+           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+          <Download className="w-4 h-4" /> Download Report
+        </a>
       </div>
 
-      {/* Portfolio summary */}
-      <div className="grid grid-cols-3 gap-4">
-        {portfolio.total_policies && (
-          <MetricCard label="Total Policies" value={Number(portfolio.total_policies).toLocaleString()} color="blue" />
+      {/* ── Section 1: Data Diff Summary ── */}
+      <Section title="Data Change Summary">
+        <p className="text-sm text-gray-500 mb-4">
+          <strong>What this shows:</strong> Statistical comparison between the incoming data (raw/bronze)
+          and the current approved version (silver). Highlights magnitude of change in each column.
+        </p>
+        <div className="grid grid-cols-4 gap-3 mb-4">
+          <MetricCard label="Incoming Rows" value={dd.raw_count?.toLocaleString() || '0'} color="blue" />
+          <MetricCard label="Current Rows" value={dd.silver_count?.toLocaleString() || '0'} color="gray" />
+          <MetricCard label="New Rows" value={dd.new_rows?.toLocaleString() || '0'} color="green" />
+          <MetricCard label="Removed Rows" value={dd.removed_rows?.toLocaleString() || '0'} color="red" />
+        </div>
+        {dd.column_shifts?.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b">
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Column</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">Old Mean</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">New Mean</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">Shift</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">Direction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dd.column_shifts.map((s: any, i: number) => (
+                  <tr key={i} className="border-b hover:bg-gray-50">
+                    <td className="px-3 py-2 font-mono text-xs">{s.column}</td>
+                    <td className="px-3 py-2 text-right text-gray-500">{s.old_mean}</td>
+                    <td className="px-3 py-2 text-right font-medium">{s.new_mean}</td>
+                    <td className={`px-3 py-2 text-right font-semibold ${
+                      s.severity === 'high' ? 'text-red-600' : s.severity === 'medium' ? 'text-amber-600' : 'text-green-600'
+                    }`}>{s.shift_pct > 0 ? '+' : ''}{s.shift_pct}%</td>
+                    <td className="px-3 py-2">
+                      <div className="w-20 h-3 bg-gray-100 rounded-full overflow-hidden relative">
+                        <div className={`absolute top-0 h-full rounded-full ${s.shift_pct >= 0 ? 'bg-red-400 left-1/2' : 'bg-green-400 right-1/2'}`}
+                             style={{ width: `${Math.min(50, Math.abs(s.shift_pct) * 2.5)}%` }} />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-        {portfolio.total_gwp && (
-          <MetricCard label="Total GWP" value={`£${formatGwp(portfolio.total_gwp)}`} color="blue" />
-        )}
-        {portfolio.overpriced_count && (
-          <MetricCard label="Overpriced Policies" value={Number(portfolio.overpriced_count).toLocaleString()} color="amber" />
-        )}
-        {portfolio.overpriced_gwp && (
-          <MetricCard label="Overpriced GWP" value={`£${formatGwp(portfolio.overpriced_gwp)}`} color="amber" />
-        )}
-        {portfolio.underpriced_count && (
-          <MetricCard label="Underpriced Policies" value={Number(portfolio.underpriced_count).toLocaleString()} color="red" />
-        )}
-        {portfolio.underpriced_gwp && (
-          <MetricCard label="Underpriced GWP" value={`£${formatGwp(portfolio.underpriced_gwp)}`} color="red" />
-        )}
-        {portfolio.high_risk_count && (
-          <MetricCard label="High Risk Policies" value={Number(portfolio.high_risk_count).toLocaleString()} color="red" />
-        )}
-        {portfolio.high_risk_gwp && (
-          <MetricCard label="High Risk GWP" value={`£${formatGwp(portfolio.high_risk_gwp)}`} color="red" />
-        )}
-        {portfolio.high_risk_policies && (
-          <MetricCard label="High Risk Policies" value={Number(portfolio.high_risk_policies).toLocaleString()} color="red" />
-        )}
-        {portfolio.potentially_underpriced && (
-          <MetricCard label="Potentially Underpriced" value={Number(portfolio.potentially_underpriced).toLocaleString()} color="amber" />
-        )}
-        {portfolio.renewals_next_90d && (
-          <MetricCard label="Renewals (90 days)" value={Number(portfolio.renewals_next_90d).toLocaleString()} color="gray" />
-        )}
-        {portfolio.renewal_gwp_next_90d && (
-          <MetricCard label="Renewal GWP (90d)" value={`£${formatGwp(portfolio.renewal_gwp_next_90d)}`} color="gray" />
-        )}
-      </div>
+      </Section>
 
-      {/* Tier breakdown */}
-      {data.by_tier && data.by_tier.length > 0 && (
-        <Section title="Breakdown by Tier">
-          <SimpleTable rows={data.by_tier} />
-        </Section>
+      {/* ── Section 2: Portfolio Impact ── */}
+      {pi.affected_policies > 0 ? (
+        <>
+          <Section title="Portfolio Impact — Affected Policies">
+            <p className="text-sm text-gray-500 mb-4">
+              <strong>What this shows:</strong> The system joined the new data against the active policy book
+              and re-rated every affected policy using the proxy pricing model. This is the "shadow run" —
+              showing exact premium impact before any changes go live.
+            </p>
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              <MetricCard label="Affected Policies" value={`${pi.affected_policies?.toLocaleString()} of ${pi.total_policies?.toLocaleString()} (${pi.affected_pct}%)`} color="blue" />
+              <MetricCard label="Total Premium Delta" value={`£${formatGwp(pi.premium_delta_total)}`} color={pi.premium_delta_total > 0 ? 'red' : 'green'} />
+              <MetricCard label="Avg Delta / Policy" value={`£${pi.premium_delta_avg?.toLocaleString()}`} color="gray" />
+              <MetricCard label="Flagged (>10% change)" value={pi.flagged_count?.toLocaleString() || '0'} color={pi.flagged_count > 0 ? 'red' : 'green'} />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="border rounded-lg p-3 text-center bg-red-50 border-red-200">
+                <div className="text-2xl font-bold text-red-700">{pi.policies_increase?.toLocaleString()}</div>
+                <div className="text-xs text-red-600 mt-1">Premium Increase</div>
+              </div>
+              <div className="border rounded-lg p-3 text-center bg-green-50 border-green-200">
+                <div className="text-2xl font-bold text-green-700">{pi.policies_decrease?.toLocaleString()}</div>
+                <div className="text-xs text-green-600 mt-1">Premium Decrease</div>
+              </div>
+              <div className="border rounded-lg p-3 text-center bg-gray-50 border-gray-200">
+                <div className="text-2xl font-bold text-gray-700">{pi.policies_unchanged?.toLocaleString()}</div>
+                <div className="text-xs text-gray-600 mt-1">Unchanged</div>
+              </div>
+            </div>
+          </Section>
+
+          {/* Histogram */}
+          {pi.histogram?.length > 0 && (
+            <Section title="Premium Change Distribution">
+              <p className="text-sm text-gray-500 mb-4">
+                <strong>What this shows:</strong> How premium changes are distributed across the portfolio.
+                A concentration in the tails (&gt;10% or &lt;-10%) indicates significant pricing disruption.
+              </p>
+              <div className="flex items-end gap-1.5 h-40">
+                {pi.histogram.map((h: any, i: number) => {
+                  const maxCount = Math.max(...pi.histogram.map((x: any) => x.count || 0));
+                  const heightPct = maxCount > 0 ? (h.count / maxCount) * 100 : 0;
+                  const isNegative = h.bucket.includes('-');
+                  const isExtreme = h.bucket.includes('10');
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center">
+                      <div className="text-xs font-medium text-gray-700 mb-1">{h.count}</div>
+                      <div className={`w-full rounded-t transition-all ${
+                        isExtreme ? (isNegative ? 'bg-green-500' : 'bg-red-500')
+                        : isNegative ? 'bg-green-300' : h.bucket === '0%' ? 'bg-gray-300' : 'bg-red-300'
+                      }`} style={{ height: `${heightPct}%`, minHeight: h.count > 0 ? '4px' : '0' }} />
+                      <div className="text-[10px] text-gray-500 mt-1 text-center leading-tight">{h.bucket}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          )}
+
+          {/* By Industry */}
+          {pi.by_industry?.length > 0 && (
+            <Section title="Impact by Class of Business">
+              <p className="text-sm text-gray-500 mb-3">
+                <strong>What this shows:</strong> How the premium impact breaks down by industry risk tier.
+                Identifies which business lines face the most pricing pressure.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Industry Tier</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">Policies</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">GWP</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">Total Delta</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Impact</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pi.by_industry.map((row: any, i: number) => {
+                      const maxDelta = Math.max(...pi.by_industry.map((x: any) => Math.abs(x.total_delta || 0)));
+                      const barPct = maxDelta > 0 ? Math.abs(row.total_delta) / maxDelta * 100 : 0;
+                      return (
+                        <tr key={i} className="border-b hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{row.industry}</td>
+                          <td className="px-3 py-2 text-right">{row.policies?.toLocaleString()}</td>
+                          <td className="px-3 py-2 text-right">£{formatGwp(row.gwp)}</td>
+                          <td className={`px-3 py-2 text-right font-semibold ${row.total_delta > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {row.total_delta > 0 ? '+' : ''}£{formatGwp(row.total_delta)}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="w-24 h-3 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${row.total_delta > 0 ? 'bg-red-400' : 'bg-green-400'}`}
+                                   style={{ width: `${barPct}%` }} />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          )}
+
+          {/* By Region */}
+          {pi.by_region?.length > 0 && (
+            <Section title="Geographic Distribution of Impact">
+              <p className="text-sm text-gray-500 mb-3">
+                <strong>What this shows:</strong> Regional breakdown of premium changes. Identifies geographic
+                concentration risk — if one region is disproportionately affected, it may indicate
+                localised risk events (e.g. new flood mapping) that need specific underwriting attention.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+                {pi.by_region.map((row: any, i: number) => (
+                  <div key={i} className={`border rounded-lg p-3 text-center ${
+                    row.total_delta > 0 ? 'bg-red-50 border-red-200' : row.total_delta < 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
+                  }`}>
+                    <div className="font-bold text-gray-800">{row.region}</div>
+                    <div className="text-xs text-gray-500">{row.policies} policies</div>
+                    <div className={`text-sm font-semibold mt-1 ${row.total_delta > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {row.total_delta > 0 ? '+' : ''}£{formatGwp(row.total_delta)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {/* Flagged Policies */}
+          {pi.flagged_policies?.length > 0 && (
+            <Section title={`Policies Requiring Attention (${pi.flagged_count} with >10% change)`}>
+              <p className="text-sm text-gray-500 mb-3">
+                <strong>What this shows:</strong> Individual policies where the premium impact exceeds 10%.
+                These require senior underwriter review before the data merge is approved — a large rate
+                change could trigger customer churn or regulatory scrutiny.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Policy ID</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Postcode</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Industry</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">Current Premium</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">Delta</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">Change %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pi.flagged_policies.slice(0, 15).map((row: any, i: number) => (
+                      <tr key={i} className="border-b hover:bg-red-50/30">
+                        <td className="px-3 py-2 font-mono text-xs">{row.policy_id}</td>
+                        <td className="px-3 py-2">{row.postcode}</td>
+                        <td className="px-3 py-2">{row.industry}</td>
+                        <td className="px-3 py-2 text-right">£{row.current_premium?.toLocaleString()}</td>
+                        <td className={`px-3 py-2 text-right font-semibold ${row.premium_delta > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {row.premium_delta > 0 ? '+' : ''}£{row.premium_delta?.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            Math.abs(row.delta_pct) > 20 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                          }`}>{row.delta_pct > 0 ? '+' : ''}{row.delta_pct}%</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          )}
+        </>
+      ) : (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+          <CheckCircle2 className="w-8 h-8 text-green-500 mx-auto mb-2" />
+          <p className="text-green-700 font-medium">No pricing impact detected — the new data matches current values.</p>
+        </div>
       )}
 
-      {/* Insights */}
-      <Section title="Key Insights">
-        <div className="space-y-3">
-          {data.insights?.map((insight: any, i: number) => (
-            <div
-              key={i}
-              className={`rounded-lg p-4 border ${
-                insight.severity === 'high'
-                  ? 'bg-red-50 border-red-200'
-                  : insight.severity === 'medium'
-                  ? 'bg-amber-50 border-amber-200'
-                  : 'bg-blue-50 border-blue-200'
-              }`}
-            >
-              <h4 className={`font-semibold ${
-                insight.severity === 'high' ? 'text-red-800' : insight.severity === 'medium' ? 'text-amber-800' : 'text-blue-800'
-              }`}>
-                {insight.title}
-              </h4>
-              <p className={`text-sm mt-1 ${
-                insight.severity === 'high' ? 'text-red-600' : insight.severity === 'medium' ? 'text-amber-600' : 'text-blue-600'
-              }`}>
-                {insight.description}
-              </p>
+      {/* ── Section 3: Risk Summary ── */}
+      {rs.score_type && (
+        <Section title={`Risk Score Analysis — ${rs.score_type}`}>
+          <p className="text-sm text-gray-500 mb-4">
+            <strong>What this shows:</strong> How risk scores are shifting between the old and new dataset version.
+            Tier migration shows policies moving between risk categories — "Low to High" transitions are the
+            most important to flag as they represent newly discovered risk.
+          </p>
+          {rs.score_shift && (
+            <div className="grid grid-cols-5 gap-3 mb-4">
+              <MetricCard label={`Old Avg ${rs.score_type}`} value={String(rs.score_shift.old_avg_score ?? '—')} color="gray" />
+              <MetricCard label={`New Avg ${rs.score_type}`} value={String(rs.score_shift.new_avg_score ?? '—')} color="blue" />
+              <MetricCard label="Worsened" value={String(rs.score_shift.worsened ?? 0)} color="red" />
+              <MetricCard label="Improved" value={String(rs.score_shift.improved ?? 0)} color="green" />
+              <MetricCard label="Unchanged" value={String(rs.score_shift.unchanged ?? 0)} color="gray" />
             </div>
-          ))}
-        </div>
-      </Section>
+          )}
+          {rs.tier_migration?.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">From Tier</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">To Tier</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Count</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">Direction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rs.tier_migration.map((row: any, i: number) => {
+                    const from = row.old_tier;
+                    const to = row.new_tier;
+                    const key = Object.keys(row).find(k => k !== 'old_tier' && k !== 'new_tier') || '';
+                    const count = row[key] || 0;
+                    const worsened = (from === 'Low' && to !== 'Low') || (from === 'Medium' && to === 'High') ||
+                                     (from === 'Prime' && to !== 'Prime') || (from === 'Standard' && (to === 'Sub-Standard' || to === 'High Risk'));
+                    const improved = (to === 'Low' && from !== 'Low') || (to === 'Medium' && from === 'High') ||
+                                     (to === 'Prime' && from !== 'Prime');
+                    return (
+                      <tr key={i} className={`border-b ${worsened ? 'bg-red-50/40' : improved ? 'bg-green-50/40' : ''}`}>
+                        <td className="px-3 py-2 font-medium">{from}</td>
+                        <td className="px-3 py-2 font-medium">{to}</td>
+                        <td className="px-3 py-2 text-right">{Number(count).toLocaleString()}</td>
+                        <td className="px-3 py-2">
+                          {from === to ? <span className="text-gray-400 text-xs">No change</span> :
+                           worsened ? <span className="text-red-600 text-xs font-medium">Risk increased</span> :
+                           improved ? <span className="text-green-600 text-xs font-medium">Risk decreased</span> :
+                           <span className="text-amber-600 text-xs">Shifted</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      )}
     </div>
   );
 }

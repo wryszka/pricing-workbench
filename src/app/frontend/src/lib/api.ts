@@ -25,6 +25,8 @@ export const api = {
   // Download
   downloadDataset: (id: string, layer: string = 'silver') =>
     `${BASE}/datasets/${id}/download?layer=${layer}`,
+  downloadImpactReport: (id: string) =>
+    `${BASE}/datasets/${id}/impact/download`,
 
   // Upload
   validateUpload: async (id: string, file: File) => {

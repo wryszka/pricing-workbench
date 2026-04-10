@@ -228,173 +228,445 @@ async def get_dataset_diff(dataset_id: str):
 
 
 # ---------------------------------------------------------------------------
-# 3. Impact analytics — simulated pricing impact
+# 3. Impact analytics — "Shadow Pricing" simulation
+#
+# When new data is staged, we automatically re-rate every affected policy
+# using a proxy pricing formula and show the actuary the exact financial
+# impact BEFORE they approve the merge.
+#
+# Proxy pricing formula (mirrors a real rating engine):
+#   Technical_Price = BASE_RATE × (sum_insured / 1000) × industry_factor
+#                     × flood_factor × crime_factor × construction_factor
 # ---------------------------------------------------------------------------
+
+# SQL fragments for the proxy pricing formula (reused across queries)
+_PRICING_SQL = """
+    CASE p.industry_risk_tier
+        WHEN 'High' THEN 1.8 WHEN 'Medium' THEN 1.2 ELSE 0.85
+    END AS industry_factor,
+    CASE p.construction_type
+        WHEN 'Fire Resistive' THEN 0.7 WHEN 'Non-Combustible' THEN 0.85
+        WHEN 'Joisted Masonry' THEN 1.0 WHEN 'Heavy Timber' THEN 1.15
+        WHEN 'Frame' THEN 1.4 ELSE 1.0
+    END AS construction_factor,
+    ROUND(0.8 + COALESCE(p.crime_theft_index, 50) / 100.0 * 0.7, 2) AS crime_factor
+"""
+
 
 @router.get("/{dataset_id}/impact")
 async def get_dataset_impact(dataset_id: str):
-    """Simulate the pricing impact of merging this dataset into the UPT."""
+    """Run a shadow pricing simulation for this dataset against the portfolio."""
     if dataset_id not in EXTERNAL_DATASETS:
         raise HTTPException(404, f"Unknown dataset: {dataset_id}")
 
-    upt_table = fqn("unified_pricing_table_live")
-    policies_table = fqn("internal_commercial_policies")
+    ds = EXTERNAL_DATASETS[dataset_id]
+    upt = fqn("unified_pricing_table_live")
+    raw = fqn(ds["raw_table"])
+    silver = fqn(ds["silver_table"])
+
+    # ------------------------------------------------------------------
+    # Section 1: Data Diff — statistical shift in the incoming data
+    # ------------------------------------------------------------------
+    numeric_cols = [c for c in ds["expected_columns"]
+                    if c not in ("match_key_sic_region", "postcode_sector", "company_id", "policy_id")]
+
+    stats_parts = []
+    for c in numeric_cols:
+        stats_parts.append(f"""
+            ROUND(AVG(CAST(r.{c} AS DOUBLE)), 3) AS new_{c}_mean,
+            ROUND(STDDEV(CAST(r.{c} AS DOUBLE)), 3) AS new_{c}_std,
+            ROUND(MIN(CAST(r.{c} AS DOUBLE)), 3) AS new_{c}_min,
+            ROUND(MAX(CAST(r.{c} AS DOUBLE)), 3) AS new_{c}_max
+        """)
+    for c in numeric_cols:
+        stats_parts.append(f"""
+            ROUND(AVG(CAST(s.{c} AS DOUBLE)), 3) AS old_{c}_mean,
+            ROUND(STDDEV(CAST(s.{c} AS DOUBLE)), 3) AS old_{c}_std
+        """)
 
     if dataset_id == "market_pricing_benchmark":
-        # Impact: how market position changes affect competitiveness
-        impact = await execute_query(f"""
-            WITH current_book AS (
-                SELECT
-                    count(*) as total_policies,
-                    sum(current_premium) as total_gwp,
-                    avg(current_premium) as avg_premium,
-                    count(CASE WHEN renewal_date <= date_add(current_date(), 90) THEN 1 END) as renewals_next_90d,
-                    sum(CASE WHEN renewal_date <= date_add(current_date(), 90) THEN current_premium ELSE 0 END) as renewal_gwp_next_90d
-                FROM {policies_table}
-            ),
-            market_position AS (
-                SELECT
-                    count(*) as policies_with_market_data,
-                    avg(market_position_ratio) as avg_market_position,
-                    count(CASE WHEN market_position_ratio > 1.2 THEN 1 END) as overpriced_count,
-                    count(CASE WHEN market_position_ratio < 0.8 THEN 1 END) as underpriced_count,
-                    sum(CASE WHEN market_position_ratio > 1.2 THEN current_premium ELSE 0 END) as overpriced_gwp,
-                    sum(CASE WHEN market_position_ratio < 0.8 THEN current_premium ELSE 0 END) as underpriced_gwp
-                FROM {upt_table}
-                WHERE market_position_ratio IS NOT NULL
-            )
-            SELECT * FROM current_book CROSS JOIN market_position
-        """)
-
-        return {
-            "dataset_id": dataset_id,
-            "impact_type": "Market Competitiveness",
-            "summary": impact[0] if impact else {},
-            "insights": [
-                {
-                    "title": "Competitive Positioning",
-                    "description": "Market pricing data enables identification of over/under-priced segments",
-                    "severity": "high",
-                },
-                {
-                    "title": "Renewal Risk",
-                    "description": "Policies renewing in next 90 days can be re-rated with fresh market intelligence",
-                    "severity": "medium",
-                },
-                {
-                    "title": "New Business Targeting",
-                    "description": "Identifies segments where we can competitively price to win business",
-                    "severity": "medium",
-                },
-            ],
-        }
-
+        join_key = "match_key_sic_region"
     elif dataset_id == "geospatial_hazard_enrichment":
-        # Impact: how location risk changes affect the book
-        impact = await execute_query(f"""
-            SELECT
-                count(*) as total_policies,
-                sum(current_premium) as total_gwp,
-                location_risk_tier,
-                count(*) as tier_count,
-                avg(current_premium) as avg_premium,
-                avg(composite_location_risk) as avg_risk_score,
-                sum(CASE WHEN flood_zone_rating >= 7 THEN 1 ELSE 0 END) as high_flood_risk,
-                sum(CASE WHEN subsidence_risk >= 7 THEN 1 ELSE 0 END) as high_subsidence_risk
-            FROM {upt_table}
-            WHERE location_risk_tier IS NOT NULL
-            GROUP BY location_risk_tier
-            ORDER BY location_risk_tier
+        join_key = "postcode_sector"
+    else:
+        join_key = "policy_id"
+
+    diff_stats_sql = f"""
+        SELECT {', '.join(stats_parts)},
+            (SELECT COUNT(*) FROM {raw}) AS raw_count,
+            (SELECT COUNT(*) FROM {silver}) AS silver_count,
+            (SELECT COUNT(*) FROM {raw} r LEFT ANTI JOIN {silver} s ON r.{join_key} = s.{join_key}) AS new_rows,
+            (SELECT COUNT(*) FROM {silver} s LEFT ANTI JOIN {raw} r ON s.{join_key} = r.{join_key}) AS removed_rows
+        FROM {raw} r FULL OUTER JOIN {silver} s ON r.{join_key} = s.{join_key}
+    """
+    diff_raw = await execute_query(diff_stats_sql)
+    d = diff_raw[0] if diff_raw else {}
+
+    column_shifts = []
+    for c in numeric_cols:
+        old_mean = _f(d.get(f"old_{c}_mean"))
+        new_mean = _f(d.get(f"new_{c}_mean"))
+        shift_pct = round((new_mean - old_mean) / old_mean * 100, 1) if old_mean else 0
+        column_shifts.append({
+            "column": c,
+            "old_mean": old_mean, "new_mean": new_mean,
+            "old_std": _f(d.get(f"old_{c}_std")), "new_std": _f(d.get(f"new_{c}_std")),
+            "new_min": _f(d.get(f"new_{c}_min")), "new_max": _f(d.get(f"new_{c}_max")),
+            "shift_pct": shift_pct,
+            "severity": "high" if abs(shift_pct) > 10 else ("medium" if abs(shift_pct) > 5 else "low"),
+        })
+
+    data_diff = {
+        "raw_count": _i(d.get("raw_count")),
+        "silver_count": _i(d.get("silver_count")),
+        "new_rows": _i(d.get("new_rows")),
+        "removed_rows": _i(d.get("removed_rows")),
+        "column_shifts": column_shifts,
+    }
+
+    # ------------------------------------------------------------------
+    # Section 2: Portfolio Impact — re-rate affected policies
+    # ------------------------------------------------------------------
+    portfolio_impact = await _compute_portfolio_impact(dataset_id, join_key, upt, raw, silver)
+
+    # ------------------------------------------------------------------
+    # Section 3: Risk Summary — tier migration and score distribution
+    # ------------------------------------------------------------------
+    risk_summary = await _compute_risk_summary(dataset_id, join_key, upt, raw, silver)
+
+    return {
+        "dataset_id": dataset_id,
+        "display_name": ds["display_name"],
+        "data_diff": data_diff,
+        "portfolio_impact": portfolio_impact,
+        "risk_summary": risk_summary,
+    }
+
+
+def _f(v) -> float:
+    """Safe float cast."""
+    try:
+        return round(float(v), 3) if v is not None else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _i(v) -> int:
+    """Safe int cast."""
+    try:
+        return int(v) if v is not None else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+async def _compute_portfolio_impact(dataset_id, join_key, upt, raw, silver):
+    """Shadow-price affected policies: old features vs new features."""
+
+    if dataset_id == "geospatial_hazard_enrichment":
+        # Join on postcode_sector — re-rate with old vs new flood/crime scores
+        result = await execute_query(f"""
+            WITH changes AS (
+                SELECT r.postcode_sector,
+                    CAST(s.flood_zone_rating AS DOUBLE) AS old_flood,
+                    CAST(r.flood_zone_rating AS DOUBLE) AS new_flood,
+                    CAST(s.crime_theft_index AS DOUBLE) AS old_crime,
+                    CAST(r.crime_theft_index AS DOUBLE) AS new_crime,
+                    CAST(s.subsidence_risk AS DOUBLE) AS old_subsidence,
+                    CAST(r.subsidence_risk AS DOUBLE) AS new_subsidence
+                FROM {raw} r JOIN {silver} s ON r.postcode_sector = s.postcode_sector
+                WHERE CAST(r.flood_zone_rating AS STRING) != CAST(s.flood_zone_rating AS STRING)
+                   OR CAST(r.crime_theft_index AS STRING) != CAST(s.crime_theft_index AS STRING)
+                   OR CAST(r.subsidence_risk AS STRING) != CAST(s.subsidence_risk AS STRING)
+            ),
+            repriced AS (
+                SELECT p.policy_id, p.postcode_sector, p.sic_code,
+                    p.industry_risk_tier, p.construction_type, p.region,
+                    p.sum_insured, p.current_premium, p.renewal_date,
+                    c.old_flood, c.new_flood,
+                    -- Old technical price
+                    ROUND(5.0 * (p.sum_insured / 1000.0)
+                        * CASE p.industry_risk_tier WHEN 'High' THEN 1.8 WHEN 'Medium' THEN 1.2 ELSE 0.85 END
+                        * (0.7 + (COALESCE(c.old_flood, 5) - 1) * 0.2)
+                        * (0.8 + COALESCE(c.old_crime, 50) / 100.0 * 0.7)
+                        * CASE p.construction_type WHEN 'Fire Resistive' THEN 0.7 WHEN 'Non-Combustible' THEN 0.85 WHEN 'Heavy Timber' THEN 1.15 WHEN 'Frame' THEN 1.4 ELSE 1.0 END
+                    , 0) AS old_price,
+                    -- New technical price
+                    ROUND(5.0 * (p.sum_insured / 1000.0)
+                        * CASE p.industry_risk_tier WHEN 'High' THEN 1.8 WHEN 'Medium' THEN 1.2 ELSE 0.85 END
+                        * (0.7 + (COALESCE(c.new_flood, 5) - 1) * 0.2)
+                        * (0.8 + COALESCE(c.new_crime, 50) / 100.0 * 0.7)
+                        * CASE p.construction_type WHEN 'Fire Resistive' THEN 0.7 WHEN 'Non-Combustible' THEN 0.85 WHEN 'Heavy Timber' THEN 1.15 WHEN 'Frame' THEN 1.4 ELSE 1.0 END
+                    , 0) AS new_price
+                FROM {upt} p JOIN changes c ON p.postcode_sector = c.postcode_sector
+            )
+            SELECT *, (new_price - old_price) AS premium_delta,
+                ROUND(CASE WHEN old_price > 0 THEN (new_price - old_price) / old_price * 100 ELSE 0 END, 1) AS delta_pct
+            FROM repriced
         """)
-
-        # Overall portfolio impact
-        portfolio = await execute_query(f"""
-            SELECT
-                count(*) as total_policies,
-                sum(current_premium) as total_gwp,
-                count(CASE WHEN composite_location_risk >= 6.0 THEN 1 END) as high_risk_policies,
-                sum(CASE WHEN composite_location_risk >= 6.0 THEN current_premium ELSE 0 END) as high_risk_gwp,
-                avg(composite_location_risk) as avg_location_risk,
-                count(CASE WHEN flood_zone_rating >= 8 AND current_premium < 5000 THEN 1 END) as potentially_underpriced
-            FROM {upt_table}
-            WHERE composite_location_risk IS NOT NULL
+    elif dataset_id == "market_pricing_benchmark":
+        # Market data doesn't directly change technical price, but shifts competitive position
+        result = await execute_query(f"""
+            WITH changes AS (
+                SELECT r.match_key_sic_region,
+                    CAST(s.market_median_rate AS DOUBLE) AS old_rate,
+                    CAST(r.market_median_rate AS DOUBLE) AS new_rate
+                FROM {raw} r JOIN {silver} s ON r.match_key_sic_region = s.match_key_sic_region
+                WHERE CAST(r.market_median_rate AS STRING) != CAST(s.market_median_rate AS STRING)
+            ),
+            repriced AS (
+                SELECT p.policy_id, p.postcode_sector, p.sic_code,
+                    p.industry_risk_tier, p.construction_type, p.region,
+                    p.sum_insured, p.current_premium, p.renewal_date,
+                    c.old_rate, c.new_rate,
+                    p.current_premium AS old_price,
+                    p.current_premium AS new_price
+                FROM {upt} p
+                JOIN (SELECT DISTINCT sic_code FROM {silver}) sk ON p.sic_code = sk.sic_code
+                LEFT JOIN changes c ON c.match_key_sic_region = CONCAT(p.sic_code, '_', p.region)
+            )
+            SELECT *, 0 AS premium_delta,
+                ROUND(CASE WHEN old_rate > 0 THEN (new_rate - old_rate) / old_rate * 100 ELSE 0 END, 1) AS delta_pct
+            FROM repriced WHERE old_rate IS NOT NULL
         """)
-
-        return {
-            "dataset_id": dataset_id,
-            "impact_type": "Location Risk Assessment",
-            "by_tier": impact,
-            "portfolio": portfolio[0] if portfolio else {},
-            "insights": [
-                {
-                    "title": "Hidden Risk Exposure",
-                    "description": "Geospatial data reveals policies in high-risk zones that may be underpriced",
-                    "severity": "high",
-                },
-                {
-                    "title": "Premium Adequacy",
-                    "description": "Location scoring enables granular risk-based pricing adjustments",
-                    "severity": "medium",
-                },
-                {
-                    "title": "Portfolio Concentration",
-                    "description": "Identifies geographic concentration risk for reinsurance planning",
-                    "severity": "low",
-                },
-            ],
-        }
-
     else:  # credit_bureau
-        impact = await execute_query(f"""
-            SELECT
-                count(*) as total_policies,
-                sum(current_premium) as total_gwp,
-                credit_risk_tier,
-                count(*) as tier_count,
-                avg(current_premium) as avg_premium,
-                avg(credit_score) as avg_credit_score,
-                avg(business_stability_score) as avg_stability
-            FROM {upt_table}
-            WHERE credit_risk_tier IS NOT NULL
-            GROUP BY credit_risk_tier
-            ORDER BY credit_risk_tier
+        result = await execute_query(f"""
+            WITH changes AS (
+                SELECT r.policy_id,
+                    CAST(s.credit_score AS INT) AS old_score,
+                    CAST(r.credit_score AS INT) AS new_score,
+                    CAST(s.ccj_count AS INT) AS old_ccj,
+                    CAST(r.ccj_count AS INT) AS new_ccj
+                FROM {raw} r JOIN {silver} s ON r.policy_id = s.policy_id
+                WHERE CAST(r.credit_score AS STRING) != CAST(s.credit_score AS STRING)
+                   OR CAST(r.ccj_count AS STRING) != CAST(s.ccj_count AS STRING)
+            ),
+            repriced AS (
+                SELECT p.policy_id, p.postcode_sector, p.sic_code,
+                    p.industry_risk_tier, p.construction_type, p.region,
+                    p.sum_insured, p.current_premium, p.renewal_date,
+                    c.old_score, c.new_score,
+                    p.current_premium AS old_price,
+                    -- Credit-adjusted price: +/- 5% per 100 credit score points shift
+                    ROUND(p.current_premium * (1.0 + (c.old_score - c.new_score) / 100.0 * 0.05), 0) AS new_price
+                FROM {upt} p JOIN changes c ON p.policy_id = c.policy_id
+            )
+            SELECT *, (new_price - old_price) AS premium_delta,
+                ROUND(CASE WHEN old_price > 0 THEN (new_price - old_price) / old_price * 100 ELSE 0 END, 1) AS delta_pct
+            FROM repriced
         """)
 
-        portfolio = await execute_query(f"""
-            SELECT
-                count(*) as total_policies,
-                sum(current_premium) as total_gwp,
-                count(CASE WHEN credit_risk_tier = 'High Risk' THEN 1 END) as high_risk_count,
-                sum(CASE WHEN credit_risk_tier = 'High Risk' THEN current_premium ELSE 0 END) as high_risk_gwp,
-                count(CASE WHEN credit_risk_tier = 'Prime' THEN 1 END) as prime_count,
-                avg(business_stability_score) as avg_stability
-            FROM {upt_table}
-            WHERE credit_risk_tier IS NOT NULL
-        """)
+    if not result:
+        return {"affected_policies": 0, "total_policies": 0}
 
-        return {
-            "dataset_id": dataset_id,
-            "impact_type": "Credit Risk Profiling",
-            "by_tier": impact,
-            "portfolio": portfolio[0] if portfolio else {},
-            "insights": [
-                {
-                    "title": "Default Risk Segmentation",
-                    "description": "Bureau data enables credit-based pricing differentiation",
-                    "severity": "high",
-                },
-                {
-                    "title": "Collection Risk",
-                    "description": "Identifies policyholders with high CCJ counts for premium collection risk",
-                    "severity": "medium",
-                },
-                {
-                    "title": "Cross-sell Opportunity",
-                    "description": "Prime-rated businesses are candidates for expanded coverage",
-                    "severity": "low",
-                },
-            ],
+    total_q = await execute_query(f"SELECT COUNT(*) AS cnt FROM {upt}")
+    total = _i(total_q[0]["cnt"]) if total_q else 0
+
+    affected = len(result)
+    deltas = [_f(r.get("premium_delta", 0)) for r in result]
+    pcts = [_f(r.get("delta_pct", 0)) for r in result]
+    premiums = [_f(r.get("current_premium", 0)) for r in result]
+
+    # Histogram buckets for premium change %
+    buckets = {"< -10%": 0, "-10 to -5%": 0, "-5 to 0%": 0, "0%": 0,
+               "0 to 5%": 0, "5 to 10%": 0, "> 10%": 0}
+    for p in pcts:
+        if p < -10: buckets["< -10%"] += 1
+        elif p < -5: buckets["-10 to -5%"] += 1
+        elif p < 0: buckets["-5 to 0%"] += 1
+        elif p == 0: buckets["0%"] += 1
+        elif p < 5: buckets["0 to 5%"] += 1
+        elif p < 10: buckets["5 to 10%"] += 1
+        else: buckets["> 10%"] += 1
+
+    histogram = [{"bucket": k, "count": v} for k, v in buckets.items()]
+
+    # By industry
+    ind_map: dict[str, dict] = {}
+    for r in result:
+        tier = r.get("industry_risk_tier", "Unknown") or "Unknown"
+        if tier not in ind_map:
+            ind_map[tier] = {"industry": tier, "policies": 0, "gwp": 0, "total_delta": 0}
+        ind_map[tier]["policies"] += 1
+        ind_map[tier]["gwp"] += _f(r.get("current_premium", 0))
+        ind_map[tier]["total_delta"] += _f(r.get("premium_delta", 0))
+    by_industry = sorted(ind_map.values(), key=lambda x: abs(x["total_delta"]), reverse=True)
+
+    # By region
+    reg_map: dict[str, dict] = {}
+    for r in result:
+        region = r.get("region") or (r.get("postcode_sector", "?")[:2] if r.get("postcode_sector") else "Unknown")
+        if region not in reg_map:
+            reg_map[region] = {"region": region, "policies": 0, "gwp": 0, "total_delta": 0}
+        reg_map[region]["policies"] += 1
+        reg_map[region]["gwp"] += _f(r.get("current_premium", 0))
+        reg_map[region]["total_delta"] += _f(r.get("premium_delta", 0))
+    by_region = sorted(reg_map.values(), key=lambda x: abs(x["total_delta"]), reverse=True)
+
+    # Flagged policies (>10% change)
+    flagged = [
+        {
+            "policy_id": r.get("policy_id"),
+            "postcode": r.get("postcode_sector"),
+            "industry": r.get("industry_risk_tier"),
+            "current_premium": _f(r.get("current_premium")),
+            "premium_delta": _f(r.get("premium_delta")),
+            "delta_pct": _f(r.get("delta_pct")),
         }
+        for r in result if abs(_f(r.get("delta_pct", 0))) > 10
+    ]
+    flagged.sort(key=lambda x: abs(x["delta_pct"]), reverse=True)
+
+    return {
+        "total_policies": total,
+        "affected_policies": affected,
+        "affected_pct": round(affected / total * 100, 1) if total else 0,
+        "total_gwp": round(sum(premiums)),
+        "affected_gwp": round(sum(premiums)),
+        "premium_delta_total": round(sum(deltas)),
+        "premium_delta_avg": round(sum(deltas) / affected) if affected else 0,
+        "premium_delta_median": round(sorted(deltas)[len(deltas) // 2]) if deltas else 0,
+        "policies_increase": sum(1 for d in deltas if d > 0),
+        "policies_decrease": sum(1 for d in deltas if d < 0),
+        "policies_unchanged": sum(1 for d in deltas if d == 0),
+        "histogram": histogram,
+        "by_industry": by_industry,
+        "by_region": by_region[:15],
+        "flagged_policies": flagged[:30],
+        "flagged_count": len(flagged),
+    }
+
+
+async def _compute_risk_summary(dataset_id, join_key, upt, raw, silver):
+    """Compute risk tier migration and score distribution shift."""
+
+    if dataset_id == "geospatial_hazard_enrichment":
+        migration = await execute_query(f"""
+            SELECT
+                CASE WHEN CAST(s.flood_zone_rating AS INT) >= 7 THEN 'High'
+                     WHEN CAST(s.flood_zone_rating AS INT) >= 4 THEN 'Medium' ELSE 'Low' END AS old_tier,
+                CASE WHEN CAST(r.flood_zone_rating AS INT) >= 7 THEN 'High'
+                     WHEN CAST(r.flood_zone_rating AS INT) >= 4 THEN 'Medium' ELSE 'Low' END AS new_tier,
+                COUNT(*) AS postcodes
+            FROM {raw} r JOIN {silver} s ON r.postcode_sector = s.postcode_sector
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """)
+        score_shift = await execute_query(f"""
+            SELECT
+                ROUND(AVG(CAST(s.flood_zone_rating AS DOUBLE)), 2) AS old_avg_score,
+                ROUND(AVG(CAST(r.flood_zone_rating AS DOUBLE)), 2) AS new_avg_score,
+                SUM(CASE WHEN CAST(r.flood_zone_rating AS INT) > CAST(s.flood_zone_rating AS INT) THEN 1 ELSE 0 END) AS worsened,
+                SUM(CASE WHEN CAST(r.flood_zone_rating AS INT) < CAST(s.flood_zone_rating AS INT) THEN 1 ELSE 0 END) AS improved,
+                SUM(CASE WHEN CAST(r.flood_zone_rating AS INT) = CAST(s.flood_zone_rating AS INT) THEN 1 ELSE 0 END) AS unchanged
+            FROM {raw} r JOIN {silver} s ON r.postcode_sector = s.postcode_sector
+        """)
+        return {
+            "score_type": "Flood Zone Rating",
+            "tier_migration": migration,
+            "score_shift": score_shift[0] if score_shift else {},
+        }
+
+    elif dataset_id == "credit_bureau_summary":
+        migration = await execute_query(f"""
+            SELECT
+                CASE WHEN CAST(s.credit_score AS INT) >= 750 THEN 'Prime'
+                     WHEN CAST(s.credit_score AS INT) >= 550 THEN 'Standard'
+                     WHEN CAST(s.credit_score AS INT) >= 400 THEN 'Sub-Standard' ELSE 'High Risk' END AS old_tier,
+                CASE WHEN CAST(r.credit_score AS INT) >= 750 THEN 'Prime'
+                     WHEN CAST(r.credit_score AS INT) >= 550 THEN 'Standard'
+                     WHEN CAST(r.credit_score AS INT) >= 400 THEN 'Sub-Standard' ELSE 'High Risk' END AS new_tier,
+                COUNT(*) AS companies
+            FROM {raw} r JOIN {silver} s ON r.policy_id = s.policy_id
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """)
+        score_shift = await execute_query(f"""
+            SELECT
+                ROUND(AVG(CAST(s.credit_score AS DOUBLE)), 1) AS old_avg_score,
+                ROUND(AVG(CAST(r.credit_score AS DOUBLE)), 1) AS new_avg_score,
+                SUM(CASE WHEN CAST(r.credit_score AS INT) < CAST(s.credit_score AS INT) THEN 1 ELSE 0 END) AS worsened,
+                SUM(CASE WHEN CAST(r.credit_score AS INT) > CAST(s.credit_score AS INT) THEN 1 ELSE 0 END) AS improved,
+                SUM(CASE WHEN CAST(r.credit_score AS INT) = CAST(s.credit_score AS INT) THEN 1 ELSE 0 END) AS unchanged
+            FROM {raw} r JOIN {silver} s ON r.policy_id = s.policy_id
+        """)
+        return {
+            "score_type": "Credit Score",
+            "tier_migration": migration,
+            "score_shift": score_shift[0] if score_shift else {},
+        }
+
+    else:  # market
+        score_shift = await execute_query(f"""
+            SELECT
+                ROUND(AVG(CAST(s.market_median_rate AS DOUBLE)), 2) AS old_avg_score,
+                ROUND(AVG(CAST(r.market_median_rate AS DOUBLE)), 2) AS new_avg_score,
+                SUM(CASE WHEN CAST(r.market_median_rate AS DOUBLE) > CAST(s.market_median_rate AS DOUBLE) THEN 1 ELSE 0 END) AS worsened,
+                SUM(CASE WHEN CAST(r.market_median_rate AS DOUBLE) < CAST(s.market_median_rate AS DOUBLE) THEN 1 ELSE 0 END) AS improved,
+                SUM(CASE WHEN CAST(r.market_median_rate AS DOUBLE) = CAST(s.market_median_rate AS DOUBLE) THEN 1 ELSE 0 END) AS unchanged
+            FROM {raw} r JOIN {silver} s ON r.match_key_sic_region = s.match_key_sic_region
+        """)
+        return {
+            "score_type": "Market Median Rate",
+            "tier_migration": [],
+            "score_shift": score_shift[0] if score_shift else {},
+        }
+
+
+# Download impact report
+@router.get("/{dataset_id}/impact/download")
+async def download_impact_report(dataset_id: str):
+    """Export the policy-level impact analysis as CSV."""
+    if dataset_id not in EXTERNAL_DATASETS:
+        raise HTTPException(404, f"Unknown dataset: {dataset_id}")
+
+    # Get the full impact data
+    impact_data = await get_dataset_impact(dataset_id)
+    pi = impact_data.get("portfolio_impact", {})
+    flagged = pi.get("flagged_policies", [])
+    by_industry = pi.get("by_industry", [])
+    by_region = pi.get("by_region", [])
+
+    output = io.StringIO()
+    output.write(f"Impact Report: {impact_data.get('display_name', dataset_id)}\n")
+    output.write(f"Generated: {datetime.utcnow().isoformat()}\n\n")
+
+    output.write(f"Total Policies,{pi.get('total_policies', 0)}\n")
+    output.write(f"Affected Policies,{pi.get('affected_policies', 0)}\n")
+    output.write(f"Affected %,{pi.get('affected_pct', 0)}%\n")
+    output.write(f"Total Premium Delta,{pi.get('premium_delta_total', 0)}\n")
+    output.write(f"Avg Premium Delta,{pi.get('premium_delta_avg', 0)}\n\n")
+
+    if by_industry:
+        output.write("By Industry\n")
+        output.write("Industry,Policies,GWP,Total Delta\n")
+        for row in by_industry:
+            output.write(f"{row['industry']},{row['policies']},{round(row['gwp'])},{round(row['total_delta'])}\n")
+        output.write("\n")
+
+    if flagged:
+        output.write("Flagged Policies (>10% change)\n")
+        output.write("Policy ID,Postcode,Industry,Current Premium,Delta,Delta %\n")
+        for row in flagged:
+            output.write(f"{row['policy_id']},{row['postcode']},{row['industry']},"
+                         f"{row['current_premium']},{row['premium_delta']},{row['delta_pct']}%\n")
+
+    csv_bytes = output.getvalue().encode("utf-8")
+    filename = f"impact_report_{dataset_id}_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+
+    await log_audit_event(
+        event_type="manual_download",
+        entity_type="dataset",
+        entity_id=dataset_id,
+        entity_version="impact_report",
+        details={"report_type": "impact_analysis", "filename": filename,
+                 "affected_policies": pi.get("affected_policies", 0)},
+    )
+
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 # ---------------------------------------------------------------------------
