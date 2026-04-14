@@ -800,17 +800,27 @@ plan_schema = StructType([
     StructField("model_type", StringType()),
     StructField("target_column", StringType()),
     StructField("feature_subset_name", StringType()),
-    StructField("features", ArrayType(StringType())),
-    StructField("hyperparameters", StringType()),
+    StructField("feature_list_json", StringType()),
+    StructField("hyperparams_json", StringType()),
     StructField("rationale", StringType()),
     StructField("plan_source", StringType()),
 ])
-# Ensure all dict values are strings where needed
+# Convert features list and hyperparams dict to JSON strings
 for m in training_plan:
+    if isinstance(m.get("features"), list):
+        m["feature_list_json"] = json.dumps(m["features"])
+    elif m.get("feature_list_json") is None:
+        m["feature_list_json"] = "[]"
     if isinstance(m.get("hyperparameters"), dict):
-        m["hyperparameters"] = json.dumps(m["hyperparameters"])
-    if m.get("features") is None:
-        m["features"] = []
+        m["hyperparams_json"] = json.dumps(m["hyperparameters"])
+    elif isinstance(m.get("hyperparams_json"), dict):
+        m["hyperparams_json"] = json.dumps(m["hyperparams_json"])
+    elif m.get("hyperparams_json") is None:
+        m["hyperparams_json"] = "{}"
+    # Remove keys not in schema
+    for k in list(m.keys()):
+        if k not in [f.name for f in plan_schema.fields]:
+            del m[k]
 
 plan_df = spark.createDataFrame(training_plan, schema=plan_schema)
 plan_df.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{fqn}.mf_training_plan")
