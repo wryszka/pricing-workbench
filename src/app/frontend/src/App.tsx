@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Database, Building2, FlaskConical, Zap, Shield, Code, Rocket, Activity } from 'lucide-react';
+import { Database, Building2, FlaskConical, Zap, Shield, Code, Rocket, Activity, Home as HomeIcon, Table2 } from 'lucide-react';
 import Home from './pages/Home';
 import DatasetList from './pages/DatasetList';
 import DatasetDetail from './pages/DatasetDetail';
@@ -11,64 +11,66 @@ import ModelDeployment from './pages/ModelDeployment';
 import Monitoring from './pages/Monitoring';
 import Governance from './pages/Governance';
 
-function Nav() {
+const NAV_ITEMS = [
+  { to: '/', label: 'Home', icon: HomeIcon, match: (p: string) => p === '/' },
+  { to: '/datasets', label: 'Data Ingestion', icon: Database, match: (p: string) => p.startsWith('/dataset') },
+  { to: '/pricing-table', label: 'Pricing Table', icon: Table2, match: (p: string) => p.startsWith('/pricing-table') },
+  { to: '/development', label: 'Model Development', icon: Code, match: (p: string) => p.startsWith('/development') },
+  { to: '/models', label: 'Model Factory', icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
+  { to: '/deployment', label: 'Model Deployment', icon: Rocket, match: (p: string) => p.startsWith('/deployment') },
+  { to: '/monitoring', label: 'Monitoring', icon: Activity, match: (p: string) => p.startsWith('/monitoring') },
+  { to: '/governance', label: 'Governance', icon: Shield, match: (p: string) => p.startsWith('/governance') },
+];
+
+function Sidebar() {
   const { pathname } = useLocation();
 
-  const tabs = [
-    { to: '/', label: 'Home', icon: Database, match: (p: string) => p === '/' },
-    { to: '/datasets', label: 'Data Ingestion', icon: Database, match: (p: string) => p.startsWith('/dataset') },
-    { to: '/features', label: 'Feature Store', icon: Zap, match: (p: string) => p.startsWith('/features') },
-    { to: '/development', label: 'Model Dev', icon: Code, match: (p: string) => p.startsWith('/development') },
-    { to: '/models', label: 'Model Factory', icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
-    { to: '/deployment', label: 'Deployment', icon: Rocket, match: (p: string) => p.startsWith('/deployment') },
-    { to: '/monitoring', label: 'Monitoring', icon: Activity, match: (p: string) => p.startsWith('/monitoring') },
-    { to: '/governance', label: 'Governance', icon: Shield, match: (p: string) => p.startsWith('/governance') },
-  ];
-
   return (
-    <header className="bg-[#1e293b] text-white">
-      <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <Link to="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
-            <Database className="w-6 h-6 text-blue-400" />
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">Pricing Governance</h1>
-              <p className="text-xs text-gray-400">Data & Model Review</p>
-            </div>
+    <aside className="w-56 bg-[#1e293b] text-white min-h-screen flex flex-col shrink-0">
+      {/* Brand */}
+      <Link to="/" className="px-4 py-5 flex items-center gap-3 hover:opacity-90 transition-opacity border-b border-white/10">
+        <Database className="w-7 h-7 text-blue-400" />
+        <div>
+          <h1 className="text-sm font-bold tracking-tight leading-tight">Pricing Governance</h1>
+          <p className="text-[10px] text-gray-400">Bricksurance SE</p>
+        </div>
+      </Link>
+
+      {/* Nav items */}
+      <nav className="flex-1 px-2 py-3 space-y-0.5">
+        {NAV_ITEMS.map(({ to, label, icon: Icon, match }) => (
+          <Link key={to} to={to}
+            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+              match(pathname)
+                ? 'bg-blue-600/20 text-white font-medium'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <Icon className={`w-4 h-4 shrink-0 ${match(pathname) ? 'text-blue-400' : ''}`} />
+            {label}
           </Link>
-          <nav className="flex items-center gap-0.5">
-            {tabs.map(({ to, label, icon: Icon, match }) => (
-              <Link key={to} to={to}
-                className={`px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
-                  match(pathname) ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                <Icon className="w-3 h-3 inline mr-1" />
-                {label}
-              </Link>
-            ))}
-          </nav>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-gray-400">
-          <Building2 className="w-4 h-4" />
-          <span className="font-medium text-gray-300">Bricksurance SE</span>
-        </div>
+        ))}
+      </nav>
+
+      {/* Footer */}
+      <div className="px-4 py-3 border-t border-white/10 text-[10px] text-gray-500">
+        Demo accelerator — not a Databricks product
       </div>
-    </header>
+    </aside>
   );
 }
 
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-100 font-[system-ui]">
-        <Nav />
-        <main>
+      <div className="min-h-screen bg-gray-100 font-[system-ui] flex">
+        <Sidebar />
+        <main className="flex-1 overflow-auto">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/datasets" element={<DatasetList />} />
             <Route path="/dataset/:datasetId" element={<DatasetDetail />} />
-            <Route path="/features" element={<FeatureStore />} />
+            <Route path="/pricing-table" element={<FeatureStore />} />
             <Route path="/development" element={<ModelDevelopment />} />
             <Route path="/models" element={<ModelFactory />} />
             <Route path="/models/:runId" element={<ModelFactoryRun />} />

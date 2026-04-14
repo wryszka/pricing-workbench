@@ -39,12 +39,12 @@ export default function Home() {
           features={["MLflow experiment tracking", "Unity Catalog model registry", "AI-assisted model selection (optional)"]}
         />
         <SectionCard
-          to="/features"
+          to="/pricing-table"
           icon={Zap}
           color="green"
-          title="Feature Store"
-          description="The Unified Pricing Table as both offline (Delta Lake) and online (Lakebase) feature store. Sub-10ms lookups for real-time pricing."
-          features={["UC Feature Engineering", "Lakebase online store", "Automatic feature lookup at serving time"]}
+          title="Pricing Table"
+          description="The Unified Pricing Table — single wide table with all features for model training and real-time serving. Query with natural language via Genie."
+          features={["UC Feature Engineering", "Lakebase online store", "Genie natural language queries"]}
         />
         <SectionCard
           to="/governance"
@@ -55,49 +55,6 @@ export default function Home() {
           features={["Unity Catalog lineage", "Immutable audit log", "Regulatory export (PDF + JSON)"]}
         />
       </div>
-
-      {/* Genie Space — embedded */}
-      {config?.genie_embed_url && (
-        <div className="mb-8">
-          <div className="bg-purple-50 border border-purple-200 rounded-t-lg px-5 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <MessageCircle className="w-5 h-5 text-purple-600" />
-              <div>
-                <h3 className="font-semibold text-purple-800">Ask questions about your pricing data</h3>
-                <p className="text-xs text-purple-600">
-                  Powered by Databricks Genie — ask in natural language, get answers from the Unified Pricing Table.
-                </p>
-              </div>
-            </div>
-            <a href={config.genie_url} target="_blank" rel="noopener noreferrer"
-              className="text-xs text-purple-500 hover:text-purple-700 flex items-center gap-1">
-              Open full screen <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-          <div className="bg-white border border-t-0 border-purple-200 rounded-b-lg overflow-hidden">
-            <iframe
-              src={config.genie_embed_url}
-              className="w-full border-0"
-              style={{ height: '500px' }}
-              title="Genie Space — Pricing Data Explorer"
-              allow="clipboard-write"
-            />
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <span className="text-xs text-gray-400">Try asking:</span>
-            {[
-              "How many policies are affected by the latest flood data update?",
-              "What is the average premium by industry risk tier?",
-              "Show me the loss ratio by construction type",
-              "Which postcodes have the highest composite location risk?",
-            ].map((q, i) => (
-              <span key={i} className="text-xs text-purple-600 bg-purple-50 border border-purple-200 rounded px-2 py-0.5">
-                "{q}"
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* About */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-5">
