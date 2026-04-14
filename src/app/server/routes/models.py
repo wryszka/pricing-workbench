@@ -82,7 +82,7 @@ async def list_factory_runs():
         runs = await execute_query(f"""
             SELECT
                 p.factory_run_id,
-                p.created_at as started_at,
+                min(l.training_start_ts) as started_at,
                 count(DISTINCT p.model_config_id) as models_planned,
                 count(DISTINCT l.model_config_id) as models_trained,
                 count(DISTINCT CASE WHEN l.status = 'SUCCESS' THEN l.model_config_id END) as models_succeeded,
@@ -94,7 +94,7 @@ async def list_factory_runs():
                 ON p.factory_run_id = l.factory_run_id AND p.model_config_id = l.model_config_id
             LEFT JOIN {fqn('mf_actuary_decisions')} d
                 ON p.factory_run_id = d.factory_run_id AND p.model_config_id = d.model_config_id
-            GROUP BY p.factory_run_id, p.created_at
+            GROUP BY p.factory_run_id
             ORDER BY p.factory_run_id DESC
         """)
         return runs
