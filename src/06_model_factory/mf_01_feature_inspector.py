@@ -118,20 +118,31 @@ def get_current_user():
 
 def log_audit_event(spark, fqn, factory_run_id, event_type, details, mlflow_run_id=None, upt_version=None, actor=None):
     """Append a single event to the audit log."""
-    from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType
+    from pyspark.sql.types import StructType, StructField, StringType
     from datetime import datetime, timezone
 
-    event = {
-        "event_id": str(uuid.uuid4()),
-        "factory_run_id": factory_run_id,
-        "event_type": event_type,
-        "event_timestamp": datetime.now(timezone.utc).isoformat(),
-        "actor": actor or get_current_user(),
-        "details_json": json.dumps(details) if isinstance(details, dict) else str(details),
-        "mlflow_run_id": mlflow_run_id,
-        "upt_table_version": upt_version,
-    }
-    df = spark.createDataFrame([event])
+    schema = StructType([
+        StructField("event_id", StringType()),
+        StructField("factory_run_id", StringType()),
+        StructField("event_type", StringType()),
+        StructField("event_timestamp", StringType()),
+        StructField("actor", StringType()),
+        StructField("details_json", StringType()),
+        StructField("mlflow_run_id", StringType()),
+        StructField("upt_table_version", StringType()),
+    ])
+
+    event = (
+        str(uuid.uuid4()),
+        factory_run_id,
+        event_type,
+        datetime.now(timezone.utc).isoformat(),
+        actor or get_current_user(),
+        json.dumps(details) if isinstance(details, dict) else str(details),
+        mlflow_run_id or "",
+        str(upt_version) if upt_version is not None else "",
+    )
+    df = spark.createDataFrame([event], schema=schema)
     df.write.mode("append").saveAsTable(f"{fqn}.mf_audit_log")
 
 current_user = get_current_user()
@@ -792,7 +803,27 @@ for family, count in families.items():
 
 # COMMAND ----------
 
-plan_df = spark.createDataFrame(training_plan)
+from pyspark.sql.types import StructType, StructField, StringType, ArrayType
+plan_schema = StructType([
+    StructField("factory_run_id", StringType()),
+    StructField("model_config_id", StringType()),
+    StructField("model_family", StringType()),
+    StructField("model_type", StringType()),
+    StructField("target_column", StringType()),
+    StructField("feature_subset_name", StringType()),
+    StructField("features", ArrayType(StringType())),
+    StructField("hyperparameters", StringType()),
+    StructField("rationale", StringType()),
+    StructField("plan_source", StringType()),
+])
+# Ensure all dict values are strings where needed
+for m in training_plan:
+    if isinstance(m.get("hyperparameters"), dict):
+        m["hyperparameters"] = json.dumps(m["hyperparameters"])
+    if m.get("features") is None:
+        m["features"] = []
+
+plan_df = spark.createDataFrame(training_plan, schema=plan_schema)
 plan_df.write.mode("overwrite").saveAsTable(f"{fqn}.mf_training_plan")
 
 display(
