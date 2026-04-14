@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from server.routes import datasets, models, agent, features, governance
+from server.routes import datasets, models, agent, features, deployment, governance
 import os
 from server.config import get_workspace_host
 
@@ -42,6 +42,7 @@ app.include_router(datasets.router)
 app.include_router(models.router)
 app.include_router(agent.router)
 app.include_router(features.router)
+app.include_router(deployment.router)
 app.include_router(governance.router)
 
 

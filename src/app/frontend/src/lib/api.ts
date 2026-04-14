@@ -76,6 +76,11 @@ export const api = {
   // Feature Store
   getFeatureStoreStatus: () => fetchJson<any>('/features/status'),
 
+  // Deployment
+  getRegisteredModels: () => fetchJson<any[]>('/deployment/models'),
+  getServingEndpoints: () => fetchJson<any[]>('/deployment/endpoints'),
+  getEndpointLatency: () => fetchJson<any>('/deployment/latency'),
+
   // Governance
   getGovernanceSummary: () => fetchJson<any>('/governance/summary'),
 };
