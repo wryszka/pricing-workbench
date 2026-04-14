@@ -61,6 +61,9 @@ which pricing models should be trained.
 CONTEXT: Commercial property & casualty insurance. The table contains policy data, claims
 history, market benchmarks, geospatial risk scores, credit bureau data, and derived features.
 
+IMPORTANT: Keep your response concise. List max 10 features per model. Keep descriptions
+to 1-2 sentences each. The entire response must fit in one JSON block.
+
 RESPONSE FORMAT: Return valid JSON with this exact structure:
 {
   "recommendations": [
@@ -68,9 +71,9 @@ RESPONSE FORMAT: Return valid JSON with this exact structure:
       "model_name": "string - descriptive name",
       "model_type": "GLM_Poisson | GLM_Gamma | GBM_Classifier | GBM_Regressor",
       "target_variable": "column name",
-      "purpose": "what this model predicts and why",
-      "recommended_features": ["list of column names"],
-      "feature_rationale": "why these features",
+      "purpose": "1-2 sentence description",
+      "recommended_features": ["max 10 column names"],
+      "feature_rationale": "brief rationale",
       "regulatory_notes": "regulatory considerations",
       "priority": "high | medium | low"
     }
@@ -178,7 +181,7 @@ Requirements:
     llm_success = False
     token_usage = {}
 
-    llm_success, llm_response_text, token_usage = _call_llm(endpoint, SYSTEM_PROMPT, user_prompt)
+    llm_success, llm_response_text, token_usage = _call_llm(endpoint, SYSTEM_PROMPT, user_prompt, max_tokens=8000)
 
     # Step 3: Parse recommendations
     recommendations = None
@@ -215,7 +218,7 @@ Requirements:
         "endpoint": endpoint,
         "token_usage": token_usage,
         "recommendations": recommendations,
-        "raw_response_preview": llm_response_text[:500] if not recommendations else None,
+        "raw_response_preview": llm_response_text[:2000] if not recommendations else None,
         "profile": {
             "table": upt_table,
             "row_count": row_count,
