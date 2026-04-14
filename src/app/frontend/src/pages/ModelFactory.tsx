@@ -94,19 +94,20 @@ export default function ModelFactory() {
       {/* ── AI Analysis Panel ── */}
       {agentEnabled && (
         <div className="mb-6 space-y-4">
-          {!agentResult && (
+          {!agentResult && !agentLoading && (
             <div className="bg-purple-50 border border-purple-200 rounded-lg p-6 text-center">
               <Bot className="w-10 h-10 text-purple-400 mx-auto mb-3" />
               <p className="text-purple-700 font-medium mb-3">
                 Run the AI assistant to analyse your feature table and recommend models
               </p>
-              <button onClick={runAgent} disabled={agentLoading || !agentStatus?.available}
+              <button onClick={runAgent} disabled={!agentStatus?.available}
                 className="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors inline-flex items-center gap-2">
-                {agentLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Analysing...</>
-                 : <><Bot className="w-4 h-4" /> Run Analysis</>}
+                <Bot className="w-4 h-4" /> Run Analysis
               </button>
             </div>
           )}
+
+          {agentLoading && <AgentProgress />}
 
           {agentResult && agentResult.success && (
             <>
@@ -327,6 +328,65 @@ export default function ModelFactory() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+
+function AgentProgress() {
+  const [step, setStep] = useState(0);
+  const steps = [
+    { label: 'Connecting to Foundation Model API', detail: 'Authenticating with Claude via Databricks FMAPI' },
+    { label: 'Profiling Unified Pricing Table', detail: 'Reading column statistics, types, and distributions' },
+    { label: 'Building analysis prompt', detail: 'Composing the feature profile for the LLM' },
+    { label: 'Waiting for AI response', detail: 'Claude is analysing 90+ features across 50K policies...' },
+    { label: 'Parsing recommendations', detail: 'Extracting model configurations from the response' },
+    { label: 'Logging to audit trail', detail: 'Recording the full LLM interaction for governance' },
+  ];
+
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setStep(1), 1500),
+      setTimeout(() => setStep(2), 3000),
+      setTimeout(() => setStep(3), 5000),
+      setTimeout(() => setStep(4), 8000),
+      setTimeout(() => setStep(5), 20000),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  return (
+    <div className="bg-white border border-purple-200 rounded-lg p-6">
+      <div className="flex items-center gap-3 mb-4">
+        <Loader2 className="w-5 h-5 text-purple-600 animate-spin" />
+        <h3 className="font-semibold text-gray-900">AI Analysis in Progress</h3>
+      </div>
+      <div className="space-y-2">
+        {steps.map((s, i) => (
+          <div key={i} className={`flex items-center gap-3 py-1.5 transition-all duration-500 ${
+            i < step ? 'opacity-100' : i === step ? 'opacity-100' : 'opacity-30'
+          }`}>
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors duration-500 ${
+              i < step ? 'bg-green-500' : i === step ? 'bg-purple-500 animate-pulse' : 'bg-gray-200'
+            }`}>
+              {i < step ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+              ) : i === step ? (
+                <Loader2 className="w-3 h-3 text-white animate-spin" />
+              ) : (
+                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
+              )}
+            </div>
+            <div>
+              <span className={`text-sm font-medium ${i <= step ? 'text-gray-800' : 'text-gray-400'}`}>{s.label}</span>
+              {i === step && (
+                <p className="text-xs text-purple-600 mt-0.5">{s.detail}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-gray-400 mt-4">This typically takes 15-30 seconds. The full prompt and response will be visible in the Transparency panel.</p>
     </div>
   );
 }
