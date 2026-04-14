@@ -437,6 +437,12 @@ else:
 
 # COMMAND ----------
 
+# Ensure consistent numeric types (prevent int/float merge errors)
+for col in profile_pdf.select_dtypes(include=["int64", "int32"]).columns:
+    profile_pdf[col] = profile_pdf[col].astype(float)
+# Fill NaN with None for clean Delta serialisation
+profile_pdf = profile_pdf.where(profile_pdf.notna(), None)
+
 # Overwrite profile for this factory run (idempotent re-runs)
 spark.createDataFrame(profile_pdf).write.mode("overwrite").saveAsTable(f"{fqn}.mf_feature_profile")
 # Re-insert in append mode partitioned by factory_run_id for history
