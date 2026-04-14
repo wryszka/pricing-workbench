@@ -167,7 +167,7 @@ spark.sql(f"""
         actor STRING,
         details_json STRING,
         mlflow_run_id STRING,
-        upt_table_version BIGINT
+        upt_table_version STRING
     )
 """)
 
