@@ -1,11 +1,12 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Database, Building2, FlaskConical, Zap, Shield } from 'lucide-react';
+import { Database, Building2, FlaskConical, Zap, Shield, Code } from 'lucide-react';
 import Home from './pages/Home';
 import DatasetList from './pages/DatasetList';
 import DatasetDetail from './pages/DatasetDetail';
+import FeatureStore from './pages/FeatureStore';
+import ModelDevelopment from './pages/ModelDevelopment';
 import ModelFactory from './pages/ModelFactory';
 import ModelFactoryRun from './pages/ModelFactoryRun';
-import FeatureStore from './pages/FeatureStore';
 import Governance from './pages/Governance';
 
 function Nav() {
@@ -14,8 +15,9 @@ function Nav() {
   const tabs = [
     { to: '/', label: 'Home', icon: Database, match: (p: string) => p === '/' },
     { to: '/datasets', label: 'Data Ingestion', icon: Database, match: (p: string) => p.startsWith('/dataset') },
-    { to: '/models', label: 'Model Factory', icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
     { to: '/features', label: 'Feature Store', icon: Zap, match: (p: string) => p.startsWith('/features') },
+    { to: '/development', label: 'Model Development', icon: Code, match: (p: string) => p.startsWith('/development') },
+    { to: '/models', label: 'Model Factory', icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
     { to: '/governance', label: 'Governance', icon: Shield, match: (p: string) => p.startsWith('/governance') },
   ];
 
@@ -62,9 +64,10 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/datasets" element={<DatasetList />} />
             <Route path="/dataset/:datasetId" element={<DatasetDetail />} />
+            <Route path="/features" element={<FeatureStore />} />
+            <Route path="/development" element={<ModelDevelopment />} />
             <Route path="/models" element={<ModelFactory />} />
             <Route path="/models/:runId" element={<ModelFactoryRun />} />
-            <Route path="/features" element={<FeatureStore />} />
             <Route path="/governance" element={<Governance />} />
           </Routes>
         </main>
