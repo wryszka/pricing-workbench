@@ -11,12 +11,42 @@ import logging
 import os
 from datetime import datetime, timezone
 
+import requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from server.audit import log_audit_event
-from server.config import fqn, get_workspace_client, get_current_user
+from server.config import fqn, get_workspace_client, get_current_user, get_workspace_host
 from server.sql import execute_query
+
+
+def _call_llm(endpoint: str, system_prompt: str, user_prompt: str, max_tokens: int = 4000) -> tuple[bool, str, dict]:
+    """Call a Foundation Model API endpoint. Returns (success, response_text, token_usage)."""
+    try:
+        w = get_workspace_client()
+        host = w.config.host.rstrip("/")
+        token = w.config._header_factory()  # Gets auth headers
+
+        resp = requests.post(
+            f"{host}/serving-endpoints/{endpoint}/invocations",
+            headers={**token, "Content-Type": "application/json"},
+            json={
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0.1,
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        return True, text, usage
+    except Exception as e:
+        return False, f"LLM call failed: {e}", {}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -148,27 +178,7 @@ Requirements:
     llm_success = False
     token_usage = {}
 
-    try:
-        w = get_workspace_client()
-        response = w.serving_endpoints.query(
-            name=endpoint,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=4000,
-            temperature=0.1,
-        )
-        llm_response_text = response.choices[0].message.content
-        llm_success = True
-        if hasattr(response, "usage") and response.usage:
-            token_usage = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0),
-                "completion_tokens": getattr(response.usage, "completion_tokens", 0),
-                "total_tokens": getattr(response.usage, "total_tokens", 0),
-            }
-    except Exception as e:
-        llm_response_text = f"LLM call failed: {e}"
+    llm_success, llm_response_text, token_usage = _call_llm(endpoint, SYSTEM_PROMPT, user_prompt)
 
     # Step 3: Parse recommendations
     recommendations = None
@@ -273,20 +283,7 @@ Respond with valid JSON:
 
     user_prompt = f"Analyse these data quality profiles:\n\n{profile_text}"
 
-    llm_response_text = ""
-    llm_success = False
-    try:
-        w = get_workspace_client()
-        resp = w.serving_endpoints.query(
-            name=endpoint, messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ], max_tokens=3000, temperature=0.1,
-        )
-        llm_response_text = resp.choices[0].message.content
-        llm_success = True
-    except Exception as e:
-        llm_response_text = f"LLM call failed: {e}"
+    llm_success, llm_response_text, _ = _call_llm(endpoint, system_prompt, user_prompt, max_tokens=3000)
 
     findings = None
     if llm_success:
@@ -371,20 +368,7 @@ suitable for regulatory filings. Ground claims in data. Respond with valid JSON:
 
     user_prompt = f"Question: {req.question}\n\nContext:\n{context}"
 
-    llm_response_text = ""
-    llm_success = False
-    try:
-        w = get_workspace_client()
-        resp = w.serving_endpoints.query(
-            name=endpoint, messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ], max_tokens=3000, temperature=0.1,
-        )
-        llm_response_text = resp.choices[0].message.content
-        llm_success = True
-    except Exception as e:
-        llm_response_text = f"LLM call failed: {e}"
+    llm_success, llm_response_text, _ = _call_llm(endpoint, system_prompt, user_prompt, max_tokens=3000)
 
     explanation = None
     if llm_success:
