@@ -52,6 +52,15 @@ export default function Home() {
           features={["3 JSON payloads per transaction", "One-click model replay", "AI-assisted root cause"]}
         />
         <SectionCard
+          external
+          to={`${GITHUB_REPO_URL}/tree/main/src/new_data_impact`}
+          icon={BookOpen}
+          color="indigo"
+          title="New Data Impact"
+          description="For data scientists and actuaries: six notebooks that answer 'does adding real external data actually make pricing models better?' Builds a ~1.5M postcode enrichment from ONSPD + IMD 2019, trains standard vs enriched models, and quantifies the lift."
+          features={["Gini 0.11 → 0.25", "50-spec Model Factory", "Claude review agent", "Governance PDF"]}
+        />
+        <SectionCard
           to="/governance"
           icon={Shield}
           color="amber"
@@ -60,29 +69,6 @@ export default function Home() {
           features={["Unity Catalog lineage", "Immutable audit log", "Regulatory export (PDF + JSON)"]}
         />
       </div>
-
-      {/* For data scientists / actuaries */}
-      <a href={`${GITHUB_REPO_URL}/tree/main/src/new_data_impact`} target="_blank" rel="noopener noreferrer"
-        className="block bg-indigo-50 border border-indigo-200 rounded-lg p-5 mb-6 hover:shadow-md transition-all group">
-        <div className="flex items-center gap-3 mb-2">
-          <BookOpen className="w-5 h-5 text-indigo-600" />
-          <h3 className="font-semibold text-gray-900 group-hover:text-indigo-700 transition-colors">
-            New Data Impact — notebook study for data scientists / actuaries
-          </h3>
-          <ExternalLink className="w-4 h-4 text-gray-400 ml-auto" />
-        </div>
-        <p className="text-sm text-gray-700 mb-3">
-          Six notebooks that answer the question every pricing team has: <em>does adding real external
-          data actually make pricing models better, and by how much?</em> Builds a ~1.5M postcode
-          enrichment table from ONSPD + IMD 2019 + ONS RUC, trains standard vs enriched frequency +
-          severity models, shows the lift with coefficients, loss-ratio stability, and a governance PDF.
-        </p>
-        <div className="flex flex-wrap gap-1.5">
-          {["Gini 0.11 → 0.25", "Deviance Explained 1.0% → 5.3%", "50-spec Model Factory", "Claude review agent", "Governance PDF"].map(f => (
-            <span key={f} className="px-2 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700">{f}</span>
-          ))}
-        </div>
-      </a>
 
       {/* About */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-5">
@@ -102,8 +88,9 @@ export default function Home() {
   );
 }
 
-function SectionCard({ to, icon: Icon, color, title, description, features }: {
+function SectionCard({ to, icon: Icon, color, title, description, features, external }: {
   to: string; icon: any; color: string; title: string; description: string; features: string[];
+  external?: boolean;
 }) {
   const colorMap: Record<string, { bg: string; border: string; icon: string; badge: string }> = {
     blue:   { bg: 'bg-blue-50',   border: 'border-blue-200',   icon: 'text-blue-600',   badge: 'bg-blue-100 text-blue-700' },
@@ -111,15 +98,18 @@ function SectionCard({ to, icon: Icon, color, title, description, features }: {
     green:  { bg: 'bg-green-50',  border: 'border-green-200',  icon: 'text-green-600',  badge: 'bg-green-100 text-green-700' },
     amber:  { bg: 'bg-amber-50',  border: 'border-amber-200',  icon: 'text-amber-600',  badge: 'bg-amber-100 text-amber-700' },
     red:    { bg: 'bg-red-50',    border: 'border-red-200',    icon: 'text-red-600',    badge: 'bg-red-100 text-red-700' },
+    indigo: { bg: 'bg-indigo-50', border: 'border-indigo-200', icon: 'text-indigo-600', badge: 'bg-indigo-100 text-indigo-700' },
   };
   const c = colorMap[color] || colorMap.blue;
 
-  return (
-    <Link to={to} className={`block ${c.bg} border ${c.border} rounded-lg p-5 hover:shadow-md transition-all group`}>
+  const body = (
+    <>
       <div className="flex items-center gap-3 mb-2">
         <Icon className={`w-5 h-5 ${c.icon}`} />
         <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">{title}</h3>
-        <ArrowRight className="w-4 h-4 text-gray-400 ml-auto group-hover:translate-x-1 transition-transform" />
+        {external
+          ? <ExternalLink className="w-4 h-4 text-gray-400 ml-auto" />
+          : <ArrowRight className="w-4 h-4 text-gray-400 ml-auto group-hover:translate-x-1 transition-transform" />}
       </div>
       <p className="text-sm text-gray-600 mb-3">{description}</p>
       <div className="flex flex-wrap gap-1.5">
@@ -127,6 +117,13 @@ function SectionCard({ to, icon: Icon, color, title, description, features }: {
           <span key={i} className={`px-2 py-0.5 rounded text-[10px] font-medium ${c.badge}`}>{f}</span>
         ))}
       </div>
-    </Link>
+    </>
   );
+
+  const className = `block ${c.bg} border ${c.border} rounded-lg p-5 hover:shadow-md transition-all group`;
+
+  if (external) {
+    return <a href={to} target="_blank" rel="noopener noreferrer" className={className}>{body}</a>;
+  }
+  return <Link to={to} className={className}>{body}</Link>;
 }
