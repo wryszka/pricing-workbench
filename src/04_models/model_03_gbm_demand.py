@@ -44,7 +44,7 @@ except Exception:
 # COMMAND ----------
 
 upt_table_name = f"{fqn}.unified_pricing_table_live"
-quotes = spark.table(f"{fqn}.internal_quote_history")
+quotes = spark.table(f"{fqn}.quotes")
 upt = spark.table(upt_table_name)
 
 upt_history = spark.sql(f"DESCRIBE HISTORY {upt_table_name} LIMIT 1").collect()
@@ -68,9 +68,9 @@ enriched = (quotes
     .join(upt_features, ["sic_code", "postcode_sector"], "left")
     .withColumn("quote_to_market_ratio",
         when(col("market_median_rate").isNotNull() & (col("market_median_rate") > 0),
-             (col("quoted_premium") / (col("sum_insured") / 1000)) / col("market_median_rate"))
+             (col("gross_premium") / (col("sum_insured") / 1000)) / col("market_median_rate"))
         .otherwise(None))
-    .withColumn("log_premium", F.log1p(col("quoted_premium")))
+    .withColumn("log_premium", F.log1p(col("gross_premium")))
     .withColumn("log_si", F.log1p(col("sum_insured")))
     .withColumn("log_turnover", F.log1p(col("annual_turnover")))
 )
@@ -85,7 +85,7 @@ feature_cols = [
     "population_density_per_km2", "distance_to_coast_km",
 ]
 
-pdf = enriched.select("quote_id", "converted_flag", *feature_cols).toPandas()
+pdf = enriched.select("transaction_id", "converted_flag", *feature_cols).toPandas()
 pdf[feature_cols] = pdf[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
 
 print(f"Total quotes: {len(pdf)}, Conversion rate: {pdf['converted_flag'].mean():.1%}")
@@ -97,7 +97,7 @@ print(f"Total quotes: {len(pdf)}, Conversion rate: {pdf['converted_flag'].mean()
 
 # COMMAND ----------
 
-pdf["split_hash"] = pdf["quote_id"].apply(lambda x: abs(hash(x)) % 100)
+pdf["split_hash"] = pdf["transaction_id"].apply(lambda x: abs(hash(x)) % 100)
 train_pdf = pdf[pdf["split_hash"] < 80].copy()
 test_pdf = pdf[pdf["split_hash"] >= 80].copy()
 

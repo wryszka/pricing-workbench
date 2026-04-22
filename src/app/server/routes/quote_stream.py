@@ -1,10 +1,10 @@
 """Quote Stream routes — transaction lookup, replay, analytics, payload export.
 
 Sits on top of:
-- silver_quote_stream            (one row per transaction, flattened)
-- raw_quote_sales_requests       (JSON from sales channel)
-- raw_quote_engine_requests      (JSON to rating engine)
-- raw_quote_engine_responses     (JSON from rating engine)
+- quotes            (one row per transaction, flattened)
+- quote_payload_sales       (JSON from sales channel)
+- quote_payload_engine_request      (JSON to rating engine)
+- quote_payload_engine_response     (JSON from rating engine)
 """
 
 import hashlib
@@ -42,15 +42,16 @@ def _validate_tx(tx_id: str) -> str:
 
 @router.get("/recent")
 async def list_recent(limit: int = 50):
-    """Return recent transactions for the lookup picker."""
+    """Return recent transactions that have captured JSON payloads (picker list)."""
     limit = max(1, min(limit, 200))
     try:
         rows = await execute_query(f"""
             SELECT transaction_id, company_name, postcode, region, sic_description,
                    gross_premium, quote_status, is_outlier, model_version,
                    CAST(created_at AS STRING) AS created_at
-            FROM {fqn('silver_quote_stream')}
-            ORDER BY created_at DESC
+            FROM {fqn('quotes')}
+            WHERE has_payload = true
+            ORDER BY is_outlier DESC, created_at DESC
             LIMIT {limit}
         """)
         return rows
@@ -69,7 +70,7 @@ async def get_transaction(tx_id: str):
     try:
         meta = await execute_query(f"""
             SELECT *, CAST(created_at AS STRING) AS created_at_str
-            FROM {fqn('silver_quote_stream')}
+            FROM {fqn('quotes')}
             WHERE transaction_id = '{tx_id}'
             LIMIT 1
         """)
@@ -79,9 +80,9 @@ async def get_transaction(tx_id: str):
         payloads = {"sales": None, "engine_request": None, "engine_response": None}
 
         for key, table in [
-            ("sales",            "raw_quote_sales_requests"),
-            ("engine_request",   "raw_quote_engine_requests"),
-            ("engine_response",  "raw_quote_engine_responses"),
+            ("sales",            "quote_payload_sales"),
+            ("engine_request",   "quote_payload_engine_request"),
+            ("engine_response",  "quote_payload_engine_response"),
         ]:
             rows = await execute_query(f"""
                 SELECT payload
@@ -119,7 +120,7 @@ async def replay(tx_id: str, _req: ReplayRequest | None = None):
 
     meta = await execute_query(f"""
         SELECT gross_premium, model_version, is_outlier
-        FROM {fqn('silver_quote_stream')}
+        FROM {fqn('quotes')}
         WHERE transaction_id = '{tx_id}'
         LIMIT 1
     """)
@@ -128,7 +129,7 @@ async def replay(tx_id: str, _req: ReplayRequest | None = None):
 
     resp_rows = await execute_query(f"""
         SELECT payload
-        FROM {fqn('raw_quote_engine_responses')}
+        FROM {fqn('quote_payload_engine_response')}
         WHERE transaction_id = '{tx_id}'
         LIMIT 1
     """)
@@ -224,6 +225,8 @@ async def save_payload(tx_id: str, req: SavePayloadRequest):
 
 @router.get("/analytics/summary")
 async def analytics_summary():
+    """Analytics are scoped to the captured live-stream subset (has_payload=true).
+    That's the set of transactions an operator can actually investigate and replay."""
     try:
         rows = await execute_query(f"""
             SELECT
@@ -235,7 +238,8 @@ async def analytics_summary():
                 ROUND(AVG(CASE WHEN quote_status <> 'ABANDONED'
                                 AND NOT is_outlier THEN gross_premium END), 2)  AS avg_premium,
                 ROUND(PERCENTILE(gross_premium, 0.95), 2)             AS p95_premium
-            FROM {fqn('silver_quote_stream')}
+            FROM {fqn('quotes')}
+            WHERE has_payload = true
         """)
         return rows[0] if rows else {}
     except Exception as e:
@@ -251,8 +255,8 @@ async def analytics_outliers(limit: int = 20):
             WITH peers AS (
                 SELECT region, construction_type,
                        PERCENTILE(gross_premium, 0.99) AS p99
-                FROM {fqn('silver_quote_stream')}
-                WHERE quote_status <> 'ABANDONED'
+                FROM {fqn('quotes')}
+                WHERE quote_status <> 'ABANDONED' AND has_payload = true
                 GROUP BY region, construction_type
             )
             SELECT q.transaction_id, q.company_name, q.region, q.construction_type,
@@ -260,9 +264,10 @@ async def analytics_outliers(limit: int = 20):
                    ROUND(p.p99, 2)           AS peer_p99,
                    ROUND(q.gross_premium / NULLIF(p.p99, 0), 2) AS vs_peer_p99,
                    q.model_version, q.is_outlier
-            FROM {fqn('silver_quote_stream')} q
+            FROM {fqn('quotes')} q
             JOIN peers p USING (region, construction_type)
-            WHERE q.gross_premium > p.p99 * 3
+            WHERE q.has_payload = true
+              AND q.gross_premium > p.p99 * 3
             ORDER BY q.gross_premium DESC
             LIMIT {limit}
         """)
@@ -288,7 +293,8 @@ async def analytics_funnel():
                      COUNT_IF(quote_status = 'BOUND') * 1.0 / COUNT(*),
                      3
                    ) AS bind_rate
-            FROM {fqn('silver_quote_stream')}
+            FROM {fqn('quotes')}
+            WHERE has_payload = true
             GROUP BY channel
             ORDER BY started DESC
         """)
@@ -311,8 +317,9 @@ async def analytics_distribution():
                    ROUND(MIN(gross_premium), 0)              AS min_val,
                    ROUND(MAX(gross_premium), 0)              AS max_val,
                    COUNT(*)                                  AS n
-            FROM {fqn('silver_quote_stream')}
-            WHERE quote_status <> 'ABANDONED' AND NOT is_outlier
+            FROM {fqn('quotes')}
+            WHERE has_payload = true
+              AND quote_status <> 'ABANDONED' AND NOT is_outlier
               AND gross_premium < 500000
             GROUP BY region
             ORDER BY p50 DESC

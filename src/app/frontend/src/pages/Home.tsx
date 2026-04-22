@@ -42,12 +42,12 @@ export default function Home() {
           features={["UC Feature Engineering", "Lakebase online store", "Genie natural language queries"]}
         />
         <SectionCard
-          to="/quote-stream"
+          to="/quote-review"
           icon={Receipt}
           color="red"
-          title="Quote Stream"
-          description="Live quote traffic captured into Unity Catalog. Look up any transaction, view all three JSON payloads, flag outliers, and replay against the rating engine — without copy-pasting JSON out of Notepad."
-          features={["3 JSON payloads per transaction", "Peer-group outlier detection", "One-click simulated replay"]}
+          title="Quote Review"
+          description="Customer calls asking why they were charged so much? Look up the transaction, see the three JSON payloads captured into UC, replay against today's rating engine, and get a Claude-powered recommendation on the root cause."
+          features={["3 JSON payloads per transaction", "One-click model replay", "AI-assisted root cause"]}
         />
         <SectionCard
           to="/governance"

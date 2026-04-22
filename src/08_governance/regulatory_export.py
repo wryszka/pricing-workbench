@@ -96,7 +96,7 @@ data_lineage = {
     "source_tables": [
         f"{fqn}.internal_commercial_policies",
         f"{fqn}.internal_claims_history",
-        f"{fqn}.internal_quote_history",
+        f"{fqn}.quotes",
         f"{fqn}.silver_market_pricing_benchmark",
         f"{fqn}.silver_geospatial_hazard_enrichment",
         f"{fqn}.silver_credit_bureau_summary",

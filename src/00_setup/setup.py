@@ -289,45 +289,9 @@ print(f"✓ {fqn}.internal_claims_history — {df_claims.count():,} rows")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Internal table 3: Quote History
-
-# COMMAND ----------
-
-quote_rows = []
-for i in range(NUM_QUOTES):
-    qid = f"QTE-{200000 + i}"
-    sic = random.choice(SIC_CODE_LIST)
-    postcode = random.choices(POSTCODES, weights=POSTCODE_WEIGHTS, k=1)[0]
-    turnover = round(random.lognormvariate(13, 1.5))
-    sum_insured = round(turnover * random.uniform(1.5, 8.0))
-    quoted_premium = round(sum_insured * random.uniform(0.002, 0.015))
-    competitor_quoted = random.choice(["Y", "N", "N"])
-    converted = "Y" if random.random() < 0.38 else "N"
-    policy_id = f"POL-{100000 + i}" if converted == "Y" and i < NUM_POLICIES else None
-    # Temporal: quote dates with seasonal pattern
-    year = random.choice([2020, 2021, 2022, 2023, 2024, 2025])
-    month = random.choices(range(1, 13), weights=MONTH_WEIGHTS, k=1)[0]
-    quote_date = f"{year}-{month:02d}-{random.randint(1, 28):02d}"
-
-    quote_rows.append((qid, policy_id, sic, postcode, turnover, sum_insured,
-                       quoted_premium, competitor_quoted, converted, quote_date))
-
-quote_schema = StructType([
-    StructField("quote_id", StringType()),
-    StructField("policy_id", StringType()),
-    StructField("sic_code", StringType()),
-    StructField("postcode_sector", StringType()),
-    StructField("annual_turnover", LongType()),
-    StructField("sum_insured", LongType()),
-    StructField("quoted_premium", LongType()),
-    StructField("competitor_quoted", StringType()),
-    StructField("converted", StringType()),
-    StructField("quote_date", StringType()),
-])
-
-df_quotes = spark.createDataFrame(quote_rows, schema=quote_schema)
-df_quotes.write.mode("overwrite").saveAsTable(f"{fqn}.internal_quote_history")
-print(f"✓ {fqn}.internal_quote_history — {df_quotes.count():,} rows")
+# MAGIC (Quotes are produced by `setup_quote_stream.py` — single source of truth
+# MAGIC for all quote data, both flat rows and captured JSON payloads. No separate
+# MAGIC internal quote history is generated here.)
 
 # COMMAND ----------
 
@@ -490,7 +454,8 @@ Setup complete (scale_factor={SCALE}x).
   Internal tables (pre-existing):
     - {fqn}.internal_commercial_policies  ({NUM_POLICIES:,} rows)
     - {fqn}.internal_claims_history       (~{len(claim_rows):,} rows)
-    - {fqn}.internal_quote_history        ({NUM_QUOTES:,} rows)
+
+  Run setup_quote_stream next to generate quotes + payload tables.
 
   External CSVs in volume (for ingestion):
     - market_pricing_benchmark/    ({len(market_rows)} rows)

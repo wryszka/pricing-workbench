@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Search, AlertTriangle, Download, Copy, CheckCircle2, PlayCircle,
   FileText, BarChart3, MessageCircle, ExternalLink, ArrowUpRight,
+  Phone, Sparkles, Zap,
 } from 'lucide-react';
 import { api } from '../lib/api';
 
@@ -32,19 +33,54 @@ type Replay = {
   replay_response: any;
 };
 
-export default function QuoteStream() {
+export default function QuoteReview() {
   const [tab, setTab] = useState<'lookup' | 'analytics' | 'genie'>('lookup');
   const [config, setConfig] = useState<any>(null);
   useEffect(() => { api.getConfig().then(setConfig).catch(() => {}); }, []);
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Quote Stream</h2>
+      <div className="mb-5">
+        <h2 className="text-2xl font-bold text-gray-900">Quote Review</h2>
         <p className="text-gray-500 mt-1">
-          Live commercial quote traffic — sales channel → rating engine → sales channel.
-          Every transaction captures three JSON payloads, flattened into a silver table for investigation.
+          Investigate individual commercial quotes end-to-end. From customer call to pricing-engine replay.
         </p>
+      </div>
+
+      {/* Scenario banner — always visible, explains what this thing is for */}
+      <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-5">
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 mt-0.5 w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center">
+            <Phone className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-blue-900 mb-1">
+              Scenario — a customer calls: <em>"why was I charged so much?"</em>
+            </h3>
+            <p className="text-sm text-blue-800 leading-relaxed">
+              Every quote that flows through the rating engine is captured as three JSON payloads
+              into Unity Catalog — the sales-channel request, the call sent to the engine, and
+              the response it returned. An operator pulls up the transaction here, inspects what
+              was sent and received, and <strong>re-runs it against today's pricing model</strong> to
+              decide whether the problem is inside the engine or somewhere upstream.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-blue-700">
+              <span className="inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                Data: <code className="bg-white px-1 rounded">quotes</code> + three
+                <code className="bg-white px-1 rounded">quote_payload_*</code> tables
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                Replay: simulated against the latest model version
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                Ask Genie for broader pattern analysis
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="border-b border-gray-200 mb-6">
@@ -182,6 +218,7 @@ function LookupTab() {
           <>
             <DetailHeader detail={detail} />
             <ReplayPanel detail={detail} replay={replay} loading={replayLoading} onRun={runReplay} />
+            <AgentAnalystPanel detail={detail} replay={replay} />
             <FlatSummary detail={detail} />
             <PayloadTabs detail={detail} />
           </>
@@ -227,13 +264,17 @@ function ReplayPanel({ detail, replay, loading, onRun }: {
   detail: TxDetail; replay: Replay | null; loading: boolean; onRun: () => void;
 }) {
   const m = detail.meta;
+  const createdAt = m.created_at_str || m.created_at || '';
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
       <div className="px-5 py-3 border-b bg-gray-50 flex items-center justify-between">
         <div>
-          <h3 className="font-semibold text-gray-800 text-sm">Re-run against rating engine</h3>
+          <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-500" />
+            Re-run against the rating engine
+          </h3>
           <p className="text-xs text-gray-500">
-            Stored model <code className="bg-white px-1 rounded">{m.model_version}</code> · simulated replay
+            Compare the price stored at quote time against what today's model would return.
           </p>
         </div>
         <button onClick={onRun} disabled={loading}
@@ -242,23 +283,161 @@ function ReplayPanel({ detail, replay, loading, onRun }: {
           {loading ? 'Replaying…' : 'Re-run'}
         </button>
       </div>
-      {replay && (
-        <div className="p-5">
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <Stat label="Stored gross" value={`£${fmtInt(replay.stored_premium)}`} />
-            <Stat label="Replay gross" value={`£${fmtInt(replay.replay_premium)}`}
-              sub={`${replay.delta_pct >= 0 ? '+' : ''}${replay.delta_pct.toFixed(1)}% vs stored`}
-              subClass={Math.abs(replay.delta_pct) > 50 ? 'text-red-600' : Math.abs(replay.delta_pct) > 5 ? 'text-amber-600' : 'text-green-600'} />
-            <Stat label="Replay model" value={replay.replay_model} mono />
-          </div>
-          <div className={`rounded px-3 py-2 text-xs ${
-            Math.abs(replay.delta_pct) > 50 ? 'bg-red-50 text-red-700 border border-red-200' :
-            Math.abs(replay.delta_pct) > 5  ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                                              'bg-green-50 text-green-700 border border-green-200'}`}>
-            {replay.notes}
-          </div>
+
+      <div className="p-5">
+        {/* Side-by-side: when the quote was generated vs today's replay */}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <ComparisonBlock
+            heading="At quote time"
+            date={createdAt}
+            model={m.model_version}
+            premium={m.gross_premium ? `£${fmtInt(Number(m.gross_premium))}` : '—'}
+            tone={asBool(m.is_outlier) ? 'red' : 'neutral'}
+          />
+          <ComparisonBlock
+            heading={replay ? 'Replay (today)' : 'Replay (today) — not run yet'}
+            date={replay ? 'Just now' : '—'}
+            model={replay?.replay_model}
+            premium={replay ? `£${fmtInt(replay.replay_premium)}` : '—'}
+            tone={
+              replay && Math.abs(replay.delta_pct) > 50 ? 'green' :
+              replay && Math.abs(replay.delta_pct) > 5  ? 'amber' :
+              replay                                    ? 'green' : 'neutral'
+            }
+          />
         </div>
-      )}
+
+        {replay && (
+          <div className={`rounded-lg border px-4 py-3 text-sm flex items-start gap-3 ${
+            Math.abs(replay.delta_pct) > 50 ? 'bg-red-50 border-red-200 text-red-800' :
+            Math.abs(replay.delta_pct) > 5  ? 'bg-amber-50 border-amber-200 text-amber-800' :
+                                              'bg-green-50 border-green-200 text-green-800'}`}>
+            <div className="shrink-0 font-mono text-xl leading-none mt-0.5">
+              {replay.delta_pct >= 0 ? '+' : ''}{replay.delta_pct.toFixed(1)}%
+            </div>
+            <div>
+              <div className="font-medium text-[13px] mb-0.5">
+                {Math.abs(replay.delta_pct) > 50 ? 'Large discrepancy' :
+                 Math.abs(replay.delta_pct) > 5  ? 'Moderate drift'   :
+                                                   'Price reproduces'}
+              </div>
+              <div className="text-xs opacity-90">{replay.notes}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ComparisonBlock({ heading, date, model, premium, tone }: {
+  heading: string; date?: string; model?: string; premium: string;
+  tone: 'red' | 'amber' | 'green' | 'neutral';
+}) {
+  const toneMap = {
+    red:     'bg-red-50 border-red-200',
+    amber:   'bg-amber-50 border-amber-200',
+    green:   'bg-green-50 border-green-200',
+    neutral: 'bg-gray-50 border-gray-200',
+  };
+  const textMap = {
+    red:     'text-red-700',
+    amber:   'text-amber-700',
+    green:   'text-green-700',
+    neutral: 'text-gray-800',
+  };
+  return (
+    <div className={`rounded-lg border p-3 ${toneMap[tone]}`}>
+      <div className="text-[11px] font-medium text-gray-600 uppercase tracking-wide">{heading}</div>
+      <div className={`text-xl font-bold mt-1 font-mono ${textMap[tone]}`}>{premium}</div>
+      <div className="text-[11px] text-gray-500 mt-1 space-y-0.5">
+        {date  && <div>Generated: <span className="font-mono">{date}</span></div>}
+        {model && <div>Model: <span className="font-mono">{model}</span></div>}
+      </div>
+    </div>
+  );
+}
+
+function AgentAnalystPanel({ detail, replay }: { detail: TxDetail; replay: Replay | null }) {
+  const [running, setRunning] = useState(false);
+  const [shown,   setShown]   = useState(false);
+  const m = detail.meta;
+  const outlier = asBool(m.is_outlier);
+
+  const runMock = () => {
+    setRunning(true);
+    setTimeout(() => { setShown(true); setRunning(false); }, 1400);
+  };
+
+  // Build a plausible mock narrative based on what we know about the transaction
+  const mockNarrative = outlier ? (
+    <>
+      <p>
+        The £{fmtInt(Number(m.gross_premium))} gross premium for <strong>{m.company_name}</strong>{' '}
+        is <strong>~{replay ? Math.abs(replay.delta_pct).toFixed(0) : '4.5'}× higher</strong> than
+        the peer p99 for {m.region} × {m.construction_type} construction. Breaking it down
+        factor-by-factor:
+      </p>
+      <ul className="list-disc list-inside space-y-1 mt-2 text-[13px]">
+        <li>Base building + contents + liability premium is consistent with peers (£~{fmtInt((m.buildings_si * 0.0011 + m.contents_si * 0.01 + m.liability_si * 0.0004))}).</li>
+        <li>Loadings carry a <code className="bg-white px-1 rounded text-[11px]">factor_override_anomaly</code> entry of £48M — this is not a legitimate rating factor. It was injected upstream.</li>
+        <li>The replay against <code className="bg-white px-1 rounded text-[11px]">{replay?.replay_model || 'the latest model'}</code> returns a clean price — the current engine does not reproduce the anomaly.</li>
+      </ul>
+      <p className="mt-2 font-medium">Recommended approach:</p>
+      <ol className="list-decimal list-inside space-y-1 mt-1 text-[13px]">
+        <li>Trace the <code className="bg-white px-1 rounded text-[11px]">factor_override_anomaly</code> key in the engine request payload — check whether a factor override was sent from the sales channel or injected via a middleware rule.</li>
+        <li>Verify the ops audit log around the quote timestamp for manual factor overrides.</li>
+        <li>If no override is found, investigate the engine version (<code className="bg-white px-1 rounded text-[11px]">{m.model_version}</code>) for a known bug — run a batch re-price and flag any other transactions with the same signature.</li>
+        <li>Re-quote the customer at the replayed price of £{replay ? fmtInt(replay.replay_premium) : '~20k'} with the underwriter's sign-off.</li>
+      </ol>
+    </>
+  ) : (
+    <>
+      <p>
+        The quote prices within normal bounds for its peer group ({m.region} × {m.construction_type}).
+        No anomaly detected.
+      </p>
+      <p className="mt-2 font-medium">What Claude would check in production:</p>
+      <ul className="list-disc list-inside space-y-1 mt-1 text-[13px]">
+        <li>Factor-by-factor peer comparison: is any single loading unusually high?</li>
+        <li>Model version history: did this quote run through a known-problematic engine version?</li>
+        <li>Customer-specific patterns: any recent claims, reinstated cover, or underwriter notes?</li>
+        <li>Competitor pricing position: are we materially above or below the market for this risk?</li>
+      </ul>
+    </>
+  );
+
+  return (
+    <div className="bg-white rounded-lg border border-dashed border-purple-300 overflow-hidden">
+      <div className="px-5 py-3 border-b border-dashed border-purple-200 bg-purple-50 flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-purple-800 text-sm flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-purple-600" />
+            AI Analyst <span className="text-[10px] font-normal uppercase tracking-wide bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded">placeholder</span>
+          </h3>
+          <p className="text-xs text-purple-700 mt-0.5">
+            In production: a Claude-backed agent reads the three JSON payloads plus peer-group context,
+            explains why the price landed where it did, and recommends a remediation path.
+          </p>
+        </div>
+        <button onClick={runMock} disabled={running}
+          className="px-3 py-1.5 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5">
+          <Sparkles className="w-4 h-4" />
+          {running ? 'Analysing…' : 'Run analysis'}
+        </button>
+      </div>
+      <div className="p-5 text-sm text-gray-800 space-y-2">
+        {!shown && !running && (
+          <p className="text-gray-500 italic">
+            Click <strong>Run analysis</strong> to see a mock Claude-powered root-cause analysis
+            over the transaction. In production this would call Mosaic AI Model Serving
+            (<code className="bg-gray-100 px-1 rounded text-[11px]">databricks-claude-sonnet-4</code>)
+            with the payloads, peer-group stats, and audit log as context.
+          </p>
+        )}
+        {running && <p className="text-gray-500">Running mock analysis — in production this would take ~3–8 seconds on Claude Sonnet.</p>}
+        {shown && mockNarrative}
+      </div>
     </div>
   );
 }
@@ -546,11 +725,11 @@ function GenieTab({ config }: { config: any }) {
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
         <h3 className="font-semibold text-amber-800 mb-2">Ask Genie — setup required</h3>
         <p className="text-sm text-amber-700 mb-3">
-          Wire a Databricks Genie space over <code className="bg-white px-1 rounded">silver_quote_stream</code>,
+          Wire a Databricks Genie space over <code className="bg-white px-1 rounded">quotes</code>,
           then set <code className="bg-white px-1 rounded">GENIE_QUOTE_SPACE_ID</code> in <code className="bg-white px-1 rounded">resources/app.yml</code> and redeploy.
         </p>
         <ol className="text-sm text-amber-700 list-decimal list-inside space-y-1">
-          <li>Open Genie in the workspace and create a space over <code className="bg-white px-1 rounded">silver_quote_stream</code>.</li>
+          <li>Open Genie in the workspace and create a space over <code className="bg-white px-1 rounded">quotes</code>.</li>
           <li>Short description: <em>Commercial quote stream — transactions, prices, drop-outs, outliers.</em></li>
           <li>Copy the space ID from the URL and set it in <code className="bg-white px-1 rounded">app.yaml</code>.</li>
           <li>Redeploy the app.</li>
@@ -573,7 +752,7 @@ function GenieTab({ config }: { config: any }) {
           <MessageCircle className="w-5 h-5 text-purple-600" />
           <div>
             <h3 className="font-semibold text-purple-800">Ask Genie about the quote stream</h3>
-            <p className="text-xs text-purple-600">Natural-language Q&amp;A over <code className="bg-white px-1 rounded">silver_quote_stream</code></p>
+            <p className="text-xs text-purple-600">Natural-language Q&amp;A over <code className="bg-white px-1 rounded">quotes</code></p>
           </div>
         </div>
         {openUrl && (

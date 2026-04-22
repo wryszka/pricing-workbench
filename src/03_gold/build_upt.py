@@ -6,7 +6,7 @@
 # MAGIC denormalized table for pricing model training.
 # MAGIC
 # MAGIC **Sources:**
-# MAGIC - Internal: `internal_commercial_policies`, `internal_claims_history`, `internal_quote_history`
+# MAGIC - Internal: `internal_commercial_policies`, `internal_claims_history`, `quotes`
 # MAGIC - External (silver): `silver_market_pricing_benchmark`, `silver_geospatial_hazard_enrichment`, `silver_credit_bureau_summary`
 # MAGIC
 # MAGIC **Output:** `unified_pricing_table_live` — the Unified Pricing Table
@@ -33,7 +33,7 @@ from pyspark.sql.functions import col, when, lit, round as spark_round, expr, lo
 # Internal tables (already in Databricks)
 policies = spark.table(f"{fqn}.internal_commercial_policies")
 claims = spark.table(f"{fqn}.internal_claims_history")
-quotes = spark.table(f"{fqn}.internal_quote_history")
+quotes = spark.table(f"{fqn}.quotes")
 
 # External silver tables
 market = spark.table(f"{fqn}.silver_market_pricing_benchmark")
@@ -83,12 +83,12 @@ quotes_agg = (quotes
     .filter(col("policy_id").isNotNull())
     .groupBy("policy_id")
     .agg(
-        F.count("quote_id").alias("quote_count"),
-        F.avg("quoted_premium").alias("avg_quoted_premium"),
-        F.min("quoted_premium").alias("min_quoted_premium"),
-        F.max("quoted_premium").alias("max_quoted_premium"),
+        F.count("transaction_id").alias("quote_count"),
+        F.avg("gross_premium").alias("avg_quoted_premium"),
+        F.min("gross_premium").alias("min_quoted_premium"),
+        F.max("gross_premium").alias("max_quoted_premium"),
         F.sum(when(col("competitor_quoted") == "Y", 1).otherwise(0)).alias("competitor_quote_count"),
-        F.max("quote_date").alias("last_quote_date"),
+        F.max("created_at").alias("last_quote_date"),
     )
 )
 

@@ -41,7 +41,15 @@ dbutils.notebook.run("setup", 600, {
     "volume_name": volume,
     "scale_factor": scale,
 })
-print("✓ Step 1: Setup complete")
+print("✓ Step 1a: Setup complete (policies + claims + external CSVs)")
+
+# Quote stream — unified quotes table + JSON payload subset
+dbutils.notebook.run("setup_quote_stream", 900, {
+    "catalog_name": catalog,
+    "schema_name": schema,
+    "scale_factor": scale,
+})
+print("✓ Step 1b: Quote stream built (quotes + quote_payload_* tables)")
 
 # COMMAND ----------
 

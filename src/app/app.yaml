@@ -9,5 +9,5 @@ env:
   - name: GENIE_SPACE_ID
     value: "01f134e996251f40bf521eac22ad10f1"
   - name: GENIE_QUOTE_SPACE_ID
-    # Set after creating a Genie space over silver_quote_stream, then redeploy.
-    value: ""
+    # Genie space over the quotes + quote_payload_* tables.
+    value: "01f13e30dcd418ae88295599f23780b8"

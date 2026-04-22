@@ -10,7 +10,7 @@ A reusable demo/accelerator showing the complete pricing lifecycle on Databricks
 - **Medallion architecture:** External data → Bronze → Silver (DLT) → Gold (UPT)
 - **6 pricing models:** GLM frequency/severity, GBM demand/uplift/fraud/retention
 - **Derived factors:** urban_score, neighbourhood claim frequency — with per-factor lift attribution
-- **Quote stream:** live commercial quote traffic captured as three JSON payloads per transaction; lookup, outlier detection, and replay in one place
+- **Quote Review:** investigation workflow for "why was I charged so much?" — looks up any transaction, shows the three JSON payloads captured from the sales channel and rating engine, replays against today's model, and includes an AI-analyst placeholder for Claude-powered root-cause analysis
 - **HITL app:** React + FastAPI for actuarial review and approval
 - **Real-time serving:** Online Feature Store + Model Serving with auto feature lookup
 - **Full governance:** Audit trail, regulatory PDF export, UC lineage
