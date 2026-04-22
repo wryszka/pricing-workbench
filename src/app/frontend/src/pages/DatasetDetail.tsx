@@ -15,18 +15,47 @@ export default function DatasetDetail() {
     api.getDatasets().then(setDatasets).finally(() => setLoading(false));
   }, []);
 
+  // When the dataset category doesn't support the current tab (e.g. switching
+  // from an external feed to a claims dataset that only has Data Quality), drop
+  // back to the first available tab.
+  useEffect(() => {
+    if (!datasets.length || !datasetId) return;
+    const cur = datasets.find((d) => d.id === datasetId);
+    if (!cur) return;
+    const cat = cur.category || 'external_vendor';
+    const valid =
+      cat === 'internal'       ? ['quality']
+    : cat === 'reference_data' ? ['quality', 'upload']
+    :                            ['diff', 'impact', 'quality', 'upload', 'approval'];
+    if (!valid.includes(tab)) setTab(valid[0] as Tab);
+  }, [datasets, datasetId, tab]);
+
   const ds = datasets.find((d) => d.id === datasetId);
 
   if (loading) return <div className="p-8 text-center text-gray-500">Loading...</div>;
   if (!ds) return <div className="p-8 text-center text-red-500">Dataset not found</div>;
 
-  const tabs: { id: Tab; label: string; icon: any }[] = [
-    { id: 'diff', label: 'Data Changes', icon: GitCompare },
-    { id: 'impact', label: 'Impact Analysis', icon: TrendingUp },
-    { id: 'quality', label: 'Data Quality', icon: ShieldCheck },
-    { id: 'upload', label: 'Upload / Download', icon: Upload },
-    { id: 'approval', label: 'Approve / Reject', icon: CheckCircle2 },
-  ];
+  const category = ds.category || 'external_vendor';
+  const isInternal = category === 'internal';
+  const isReference = category === 'reference_data';
+
+  // Internal datasets are the source of truth — no version-to-version diff,
+  // no shadow-pricing impact (they ARE the policies being priced), no approval flow.
+  // They just show the data-quality view so an actuary can verify freshness + completeness.
+  const tabs: { id: Tab; label: string; icon: any }[] = isInternal
+    ? [{ id: 'quality', label: 'Data Quality', icon: ShieldCheck }]
+    : isReference
+    ? [
+        { id: 'quality', label: 'Data Quality', icon: ShieldCheck },
+        { id: 'upload',  label: 'Download',     icon: Upload },
+      ]
+    : [
+        { id: 'diff',    label: 'Data Changes',     icon: GitCompare },
+        { id: 'impact',  label: 'Impact Analysis',  icon: TrendingUp },
+        { id: 'quality', label: 'Data Quality',     icon: ShieldCheck },
+        { id: 'upload',  label: 'Upload / Download', icon: Upload },
+        { id: 'approval',label: 'Approve / Reject', icon: CheckCircle2 },
+      ];
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">

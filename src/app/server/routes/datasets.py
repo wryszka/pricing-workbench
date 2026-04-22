@@ -27,10 +27,37 @@ from server.sql import execute_query
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
-# The three external datasets we ingest
+# Datasets on the Ingestion tab. The `category` field drives the UI badge +
+# the backend short-circuits approval/upload/impact for non-external rows via
+# the existing `is_reference: True` flag.
 EXTERNAL_DATASETS = {
+    # --- internal systems of record (no review required) ---
+    "internal_commercial_policies": {
+        "display_name": "Commercial Policies",
+        "category": "internal",
+        "source": "Policy admin system (internal)",
+        "join_key": "policy_id",
+        "raw_table": "internal_commercial_policies",
+        "silver_table": "internal_commercial_policies",
+        "description": "Active commercial book — 50K in-force policies with risk, premium, and renewal information. Internal system of record; no actuary approval required.",
+        "expected_columns": ["policy_id", "company_id", "postcode_sector", "sic_code", "industry_risk_tier", "construction_type", "sum_insured", "current_premium", "renewal_date", "region"],
+        "is_reference": True,
+    },
+    "internal_claims_history": {
+        "display_name": "Claims History",
+        "category": "internal",
+        "source": "Claims system (internal)",
+        "join_key": "policy_id",
+        "raw_table": "internal_claims_history",
+        "silver_table": "internal_claims_history",
+        "description": "Full claims history against the book — frequency and severity per policy. Internal system of record; no actuary approval required.",
+        "expected_columns": ["claim_id", "policy_id", "claim_date", "peril", "paid_amount", "status"],
+        "is_reference": True,
+    },
+    # --- external vendor feeds (HITL approval workflow) ---
     "market_pricing_benchmark": {
         "display_name": "Market Pricing Benchmark",
+        "category": "external_vendor",
         "source": "External Vendor (PCW)",
         "join_key": "sic_code + region",
         "raw_table": "raw_market_pricing_benchmark",
@@ -40,6 +67,7 @@ EXTERNAL_DATASETS = {
     },
     "geospatial_hazard_enrichment": {
         "display_name": "Geospatial Hazard Enrichment",
+        "category": "external_vendor",
         "source": "External Vendor (OS/EA)",
         "join_key": "postcode_sector",
         "raw_table": "raw_geospatial_hazard_enrichment",
@@ -49,6 +77,7 @@ EXTERNAL_DATASETS = {
     },
     "credit_bureau_summary": {
         "display_name": "Credit Bureau Summary",
+        "category": "external_vendor",
         "source": "Bureau (D&B/Experian)",
         "join_key": "policy_id",
         "raw_table": "raw_credit_bureau_summary",
@@ -56,8 +85,10 @@ EXTERNAL_DATASETS = {
         "description": "Company financial health: credit score, CCJs, years trading",
         "expected_columns": ["company_id", "policy_id", "credit_score", "ccj_count", "years_trading", "director_changes"],
     },
+    # --- real public reference data (no approval — one-shot builds) ---
     "postcode_enrichment": {
         "display_name": "Postcode Enrichment (real UK public data)",
+        "category": "reference_data",
         "source": "ONS Postcode Directory + IMD 2019 + ONS Rural-Urban Classification",
         "join_key": "postcode (aggregated to postcode area for the UPT)",
         "raw_table": "postcode_enrichment",
@@ -714,34 +745,37 @@ async def get_dataset_quality(dataset_id: str):
 
     ds = EXTERNAL_DATASETS[dataset_id]
     if ds.get("is_reference"):
-        # Simple coverage checks for the reference table.
-        stats = await execute_query(f"""
-            SELECT
-                COUNT(*)                        AS row_count,
-                COUNT(imd_decile)               AS imd_non_null,
-                COUNT(is_urban)                 AS urban_non_null,
-                COUNT(is_coastal)               AS coastal_non_null,
-                COUNT(DISTINCT region_code)     AS distinct_regions,
-                COUNT(DISTINCT local_authority_code) AS distinct_local_authorities
-            FROM {fqn(ds['silver_table'])}
+        # Reference/internal datasets: no raw→silver split, so we just report
+        # a row count + per-column completeness on the (single) table.
+        table = fqn(ds['silver_table'])
+        cat, sch, tbl = table.split('.')
+        cols_q = await execute_query(f"""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_catalog='{cat}' AND table_schema='{sch}' AND table_name='{tbl}'
+              AND column_name NOT LIKE '\\_%'
+            ORDER BY ordinal_position
         """)
-        s = stats[0] if stats else {}
-        row_count = int(s.get("row_count") or 0)
-        imd_coverage = int(s.get("imd_non_null") or 0)
+        columns = [c["column_name"] for c in cols_q][:15]
+        row_q = await execute_query(f"SELECT count(*) AS n FROM {table}")
+        row_count = int(row_q[0]["n"]) if row_q else 0
+        completeness = {}
+        if columns and row_count > 0:
+            null_checks = ", ".join(
+                [f"round(count({c}) / count(*) * 100, 1) as `{c}`" for c in columns]
+            )
+            comp_q = await execute_query(f"SELECT {null_checks} FROM {table}")
+            completeness = comp_q[0] if comp_q else {}
         return {
             "is_reference": True,
-            "raw_count":    row_count,
-            "silver_count": row_count,
-            "last_ingested": None,
-            "coverage": {
-                "imd_decile":    imd_coverage,
-                "is_urban":      int(s.get("urban_non_null") or 0),
-                "is_coastal":    int(s.get("coastal_non_null") or 0),
-                "imd_coverage_pct": (imd_coverage / row_count * 100) if row_count else 0,
-            },
-            "distinct_regions":            int(s.get("distinct_regions") or 0),
-            "distinct_local_authorities":  int(s.get("distinct_local_authorities") or 0),
-            "expectations": [],
+            "category":          ds.get("category", "reference_data"),
+            "raw_row_count":     row_count,
+            "silver_row_count":  row_count,
+            "rows_dropped":      0,
+            "dq_pass_rate":      100,
+            "last_ingested":     None,
+            "freshness_status":  "fresh",
+            "completeness":      completeness,
+            "expectations":      [],
         }
     raw_table = fqn(ds["raw_table"])
     silver_table = fqn(ds["silver_table"])

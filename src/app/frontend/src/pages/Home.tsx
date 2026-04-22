@@ -28,9 +28,9 @@ export default function Home() {
           to="/datasets"
           icon={Database}
           color="blue"
-          title="External Data"
-          description="Reference and vendor data joined into the feature vector at both quote AND policy time: ONS Postcode Directory + IMD 2019, market benchmarks, geospatial hazard, credit bureau. HITL approval flow with DQ checks."
-          features={["1.5M postcode enrichment (real UK data)", "DLT expectations", "Actuary approval gate"]}
+          title="Ingestion"
+          description="Every dataset that feeds pricing: internal book (policies, claims) alongside vendor feeds (market benchmarks, geospatial hazard, credit bureau) and real public reference data (ONS Postcode Directory + IMD 2019). Vendor feeds go through an actuary approval gate with DQ checks."
+          features={["Internal book + vendor feeds + public reference", "Data-quality expectations", "Actuary approval gate"]}
         />
         <SectionCard
           to="/quote-review"

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Database, ChevronRight, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Database, ChevronRight, CheckCircle2, XCircle, Clock, Building2, Globe } from 'lucide-react';
 import { api } from '../lib/api';
 
 export default function DatasetList() {
@@ -16,8 +16,8 @@ export default function DatasetList() {
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">External Data Sources</h2>
-        <p className="text-gray-500 mt-1">Review, validate and approve external datasets before they merge into the Unified Pricing Table</p>
+        <h2 className="text-2xl font-bold text-gray-900">Ingestion</h2>
+        <p className="text-gray-500 mt-1">Every dataset that feeds pricing — the internal book (policies, claims), vendor feeds awaiting review, and real public reference data.</p>
       </div>
 
       {/* Context panels */}
@@ -40,59 +40,118 @@ export default function DatasetList() {
         </div>
       </div>
 
-      <div className="grid gap-4">
-        {datasets.map((ds) => {
-          const approval = ds.approval;
-          const status = approval?.decision || 'pending';
+      {/* Group by category so the internal book sits above the vendor feeds */}
+      {['internal', 'external_vendor', 'reference_data'].map((cat) => {
+        const rows = datasets.filter((d) => (d.category || 'external_vendor') === cat);
+        if (rows.length === 0) return null;
+        const heading =
+          cat === 'internal'         ? 'Internal book'
+        : cat === 'external_vendor'  ? 'External vendor feeds (review required)'
+        :                              'Public reference data';
+        const headingHelp =
+          cat === 'internal'         ? 'Policy and claim records from our own systems. Shown for completeness — no actuary approval needed.'
+        : cat === 'external_vendor'  ? 'Incoming vendor data needs an actuary review before it can feed pricing.'
+        :                              'Freely-available reference data (e.g. ONS). One-shot builds.';
 
-          return (
-            <Link
-              key={ds.id}
-              to={`/dataset/${ds.id}`}
-              className="bg-white rounded-lg border border-gray-200 p-5 hover:border-blue-300 hover:shadow-md transition-all group"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center">
-                    <Database className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                      {ds.display_name}
-                    </h3>
-                    <p className="text-sm text-gray-500">{ds.description}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                    <div className="text-sm text-gray-500">Source</div>
-                    <div className="text-sm font-medium">{ds.source}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-gray-500">Raw / Silver</div>
-                    <div className="text-sm font-medium">
-                      {Number(ds.raw_row_count).toLocaleString()} / {Number(ds.silver_row_count).toLocaleString()}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-gray-500">DQ Dropped</div>
-                    <div className={`text-sm font-medium ${ds.rows_dropped_by_dq > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                      {ds.rows_dropped_by_dq}
-                    </div>
-                  </div>
-                  <StatusBadge status={status} />
-                  <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500" />
-                </div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+        return (
+          <section key={cat} className="mb-6">
+            <div className="flex items-baseline justify-between mb-2">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{heading}</h3>
+              <span className="text-xs text-gray-400">{headingHelp}</span>
+            </div>
+            <div className="grid gap-3">
+              {rows.map((ds) => (
+                <DatasetCard key={ds.id} ds={ds} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function DatasetCard({ ds }: { ds: any }) {
+  const category = ds.category || 'external_vendor';
+  const isInternal = category === 'internal';
+  const isReference = category === 'reference_data';
+
+  // Icon + tile colour per category
+  const tile =
+    isInternal  ? { Icon: Building2, ring: 'bg-slate-100 text-slate-600' }
+  : isReference ? { Icon: Globe,     ring: 'bg-indigo-50 text-indigo-600' }
+  :               { Icon: Database,  ring: 'bg-blue-50 text-blue-600' };
+
+  return (
+    <Link
+      to={`/dataset/${ds.id}`}
+      className="bg-white rounded-lg border border-gray-200 p-5 hover:border-blue-300 hover:shadow-md transition-all group block"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${tile.ring}`}>
+            <tile.Icon className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+              {ds.display_name}
+            </h3>
+            <p className="text-sm text-gray-500 line-clamp-2">{ds.description}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-6 shrink-0">
+          <div className="text-right min-w-[8rem]">
+            <div className="text-xs text-gray-500">Source</div>
+            <div className="text-sm font-medium truncate max-w-[12rem]">{ds.source}</div>
+          </div>
+          {isInternal || isReference ? (
+            <div className="text-right min-w-[7rem]">
+              <div className="text-xs text-gray-500">Rows</div>
+              <div className="text-sm font-medium">{Number(ds.silver_row_count).toLocaleString()}</div>
+            </div>
+          ) : (
+            <>
+              <div className="text-right min-w-[9rem]">
+                <div className="text-xs text-gray-500">Pending / Approved</div>
+                <div className="text-sm font-medium">
+                  {Number(ds.raw_row_count).toLocaleString()} / {Number(ds.silver_row_count).toLocaleString()}
+                </div>
+              </div>
+              <div className="text-right min-w-[5rem]">
+                <div className="text-xs text-gray-500">Rows blocked</div>
+                <div className={`text-sm font-medium ${ds.rows_dropped_by_dq > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                  {ds.rows_dropped_by_dq}
+                </div>
+              </div>
+            </>
+          )}
+          <StatusBadge dataset={ds} />
+          <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 shrink-0" />
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function StatusBadge({ dataset }: { dataset: any }) {
+  const cat = dataset.category || 'external_vendor';
+  // Internal and reference datasets skip approval entirely.
+  if (cat === 'internal') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+        <Building2 className="w-3.5 h-3.5" /> Internal source
+      </span>
+    );
+  }
+  if (cat === 'reference_data') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
+        <Globe className="w-3.5 h-3.5" /> Reference
+      </span>
+    );
+  }
+  // External vendor feed — real approval workflow
+  const status = dataset.approval?.decision || 'pending';
   if (status === 'approved') {
     return (
       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
@@ -109,7 +168,7 @@ function StatusBadge({ status }: { status: string }) {
   }
   return (
     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-      <Clock className="w-3.5 h-3.5" /> Pending
+      <Clock className="w-3.5 h-3.5" /> Pending review
     </span>
   );
 }
