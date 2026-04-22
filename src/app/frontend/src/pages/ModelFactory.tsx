@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FlaskConical, ChevronRight, CheckCircle2, Clock, AlertTriangle, Bot, Loader2, ChevronDown, ChevronUp, Shield } from 'lucide-react';
+import { FlaskConical, ChevronRight, CheckCircle2, Clock, AlertTriangle, Bot, Loader2, ChevronDown, ChevronUp, Shield, Sparkles, Send, Check, FileText } from 'lucide-react';
 import { api } from '../lib/api';
 
 export default function ModelFactory() {
@@ -61,6 +61,9 @@ export default function ModelFactory() {
           </p>
         </div>
       </div>
+
+      {/* ── Agentic Planner (plan a new factory run) ── */}
+      <AgenticPlanner onSubmitted={() => api.getFactoryRuns().then(setRuns)} />
 
       {/* ── AI Assistant Toggle (OPTIONAL) ── */}
       <div className="mb-6 bg-white rounded-lg border border-gray-200 p-4">
@@ -320,6 +323,12 @@ export default function ModelFactory() {
                         <Clock className="w-3.5 h-3.5" /> Review Needed
                       </span>
                     )}
+                    <a href={api.downloadRunLogReport(run.factory_run_id)} target="_blank" rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      title="Export full run log (PDF)"
+                      className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
+                      <FileText className="w-3.5 h-3.5" /> Run log
+                    </a>
                     <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500" />
                   </div>
                 </div>
@@ -387,6 +396,261 @@ function AgentProgress() {
         ))}
       </div>
       <p className="text-xs text-gray-400 mt-4">This typically takes 15-30 seconds. The full prompt and response will be visible in the Transparency panel.</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Agentic Planner — plan a new factory run via dropdowns + Claude
+// ---------------------------------------------------------------------------
+
+type FeatureAnalysis = {
+  headline?: string;
+  strengths?: string[];
+  gaps?: string[];
+  sensitive?: string[];
+  recommended_next?: { target: string; why: string }[];
+} | null;
+
+function AgenticPlanner({ onSubmitted }: { onSubmitted: () => void }) {
+  const [analysis, setAnalysis] = useState<FeatureAnalysis>(null);
+  const [analysisRaw, setAnalysisRaw] = useState<string | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(true);
+
+  // Intent dropdowns
+  const [target, setTarget] = useState('claim_count_5y');
+  const [modelFamily, setModelFamily] = useState('GLM_Poisson');
+  const [featureScope, setFeatureScope] = useState('plus_real_uk');
+  const [sweepSize, setSweepSize] = useState(10);
+  const [focus, setFocus] = useState('exploration');
+  const [note, setNote] = useState('');
+
+  // Proposal state
+  const [plan, setPlan] = useState<any>(null);
+  const [proposing, setProposing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<any>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.analyseFeatures()
+      .then(r => { setAnalysis(r?.analysis || null); setAnalysisRaw(r?.raw || null); })
+      .catch(() => {})
+      .finally(() => setAnalysisLoading(false));
+  }, []);
+
+  const propose = async () => {
+    setProposing(true); setErrMsg(null); setPlan(null); setSubmitResult(null);
+    try {
+      const r = await api.proposePlan({
+        target, model_family: modelFamily, feature_scope: featureScope,
+        sweep_size: sweepSize, focus, note: note || undefined,
+      });
+      if (!r.success || !r.plan) {
+        setErrMsg(r.error || 'Agent did not return a valid plan. Raw response saved for debug.');
+      } else {
+        setPlan(r.plan);
+      }
+    } catch (e: any) {
+      setErrMsg(String(e?.message || e));
+    } finally {
+      setProposing(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!plan) return;
+    setSubmitting(true); setSubmitResult(null); setErrMsg(null);
+    try {
+      const r = await api.submitPlan({
+        intent: { target, model_family: modelFamily, feature_scope: featureScope, sweep_size: sweepSize, focus, note },
+        plan_summary: plan.plan_summary,
+        configs: plan.configs || [],
+        feature_analysis_text: analysis ? JSON.stringify(analysis) : (analysisRaw || undefined),
+      });
+      setSubmitResult(r);
+      onSubmitted();
+    } catch (e: any) {
+      setErrMsg(String(e?.message || e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mb-6 bg-white border border-emerald-200 rounded-lg overflow-hidden">
+      <div className="px-5 py-3 bg-emerald-50 border-b border-emerald-200 flex items-center gap-2">
+        <Sparkles className="w-4 h-4 text-emerald-700" />
+        <h3 className="font-semibold text-emerald-800 text-sm">Plan a factory run</h3>
+        <span className="text-xs text-emerald-600">Claude reads your feature catalog; you pick the shape of the sweep.</span>
+      </div>
+
+      {/* Feature analysis (Claude-backed, auto-runs) */}
+      <div className="px-5 py-4 border-b bg-gradient-to-b from-emerald-50/40 to-transparent">
+        <div className="text-[11px] font-medium text-emerald-700 uppercase tracking-wide mb-1.5">
+          Feature-store analysis
+        </div>
+        {analysisLoading && (
+          <div className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="w-3 h-3 animate-spin" /> Claude is analysing your features…</div>
+        )}
+        {!analysisLoading && analysis && (
+          <div className="space-y-1.5 text-sm text-gray-800">
+            {analysis.headline && <div className="font-medium text-gray-900">{analysis.headline}</div>}
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              {!!(analysis.strengths || []).length && (
+                <div>
+                  <div className="text-[10px] font-medium text-green-700 uppercase tracking-wide mb-0.5">Strengths</div>
+                  <ul className="list-disc list-inside text-gray-700 space-y-0.5">
+                    {analysis.strengths!.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+              {!!(analysis.gaps || []).length && (
+                <div>
+                  <div className="text-[10px] font-medium text-amber-700 uppercase tracking-wide mb-0.5">Gaps</div>
+                  <ul className="list-disc list-inside text-gray-700 space-y-0.5">
+                    {analysis.gaps!.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+            {!!(analysis.sensitive || []).length && (
+              <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 mt-1 inline-flex items-center gap-1">
+                <Shield className="w-3 h-3" /> {analysis.sensitive!.join(' · ')}
+              </div>
+            )}
+            {!!(analysis.recommended_next || []).length && (
+              <div className="text-xs text-gray-600 mt-1">
+                <span className="font-medium">Suggested next targets:</span>{' '}
+                {analysis.recommended_next!.map((r, i) => (
+                  <span key={r.target}>
+                    <code className="bg-gray-100 px-1 rounded">{r.target}</code>
+                    <span className="text-gray-500"> — {r.why}</span>
+                    {i < analysis.recommended_next!.length - 1 ? '; ' : ''}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {!analysisLoading && !analysis && (
+          <div className="text-xs text-gray-500">Feature analysis not available. (Populate <code className="bg-gray-100 px-1 rounded">feature_catalog</code> via the build_upt job.)</div>
+        )}
+      </div>
+
+      {/* Intent dropdowns */}
+      <div className="px-5 py-4 grid grid-cols-5 gap-3">
+        <Dropdown label="Target" value={target} onChange={setTarget} options={[
+          ['claim_count_5y',   'Frequency — claim_count_5y'],
+          ['total_incurred_5y','Severity — total_incurred_5y'],
+          ['loss_ratio_5y',    'Loss ratio — loss_ratio_5y'],
+        ]} />
+        <Dropdown label="Model family" value={modelFamily} onChange={setModelFamily} options={[
+          ['GLM_Poisson',     'GLM · Poisson'],
+          ['GLM_Gamma',       'GLM · Gamma'],
+          ['GBM_Classifier',  'GBM · Classifier'],
+          ['GBM_Regressor',   'GBM · Regressor'],
+        ]} />
+        <Dropdown label="Feature scope" value={featureScope} onChange={setFeatureScope} options={[
+          ['all',                 'All features'],
+          ['baseline_only',       'Baseline only'],
+          ['plus_real_uk',        'Baseline + real UK enrichment'],
+          ['exclude_regulatory',  'Exclude regulatory-sensitive'],
+        ]} />
+        <Dropdown label="Sweep size" value={String(sweepSize)} onChange={v => setSweepSize(parseInt(v, 10))} options={[
+          ['5', '5 configs'], ['10', '10 configs'], ['20', '20 configs'], ['50', '50 configs'],
+        ]} />
+        <Dropdown label="Focus" value={focus} onChange={setFocus} options={[
+          ['exploration',       'Fresh exploration'],
+          ['interaction_terms', 'Interaction terms'],
+          ['hyperparam_sweep',  'Hyperparameter sweep'],
+          ['feature_ablation',  'Feature ablation'],
+        ]} />
+      </div>
+
+      <div className="px-5 pb-4">
+        <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">
+          Optional note for the agent
+        </label>
+        <textarea value={note} onChange={e => setNote(e.target.value)}
+          rows={2} placeholder="e.g. focus on interaction between urban_score and claim_count_5y; avoid regulatory-sensitive features on this run"
+          className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none" />
+
+        <div className="mt-3 flex items-center justify-between">
+          <button onClick={propose} disabled={proposing}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700 disabled:opacity-50">
+            {proposing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            {proposing ? 'Claude is proposing…' : 'Propose plan'}
+          </button>
+          {errMsg && <span className="text-xs text-red-600">{errMsg}</span>}
+        </div>
+      </div>
+
+      {/* Proposal preview */}
+      {plan && (
+        <div className="border-t border-gray-200 px-5 py-4 bg-gray-50/50">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <div className="text-[11px] font-medium text-emerald-700 uppercase tracking-wide">Proposed plan</div>
+              <div className="text-sm text-gray-800 mt-0.5">{plan.plan_summary}</div>
+              <div className="text-[11px] text-gray-500 mt-0.5">{(plan.configs || []).length} configs proposed</div>
+            </div>
+            <button onClick={submit} disabled={submitting || submitResult}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : submitResult ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+              {submitting ? 'Submitting…' : submitResult ? 'Submitted' : 'Submit to factory'}
+            </button>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto border border-gray-200 rounded bg-white text-xs">
+            <table className="w-full">
+              <thead className="bg-gray-50 text-gray-600 sticky top-0">
+                <tr>
+                  <th className="px-2 py-1 text-left font-medium">Config</th>
+                  <th className="px-2 py-1 text-left font-medium">Features</th>
+                  <th className="px-2 py-1 text-left font-medium">Hyperparams</th>
+                  <th className="px-2 py-1 text-left font-medium">Rationale</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(plan.configs || []).map((cfg: any) => (
+                  <tr key={cfg.config_id} className="hover:bg-emerald-50">
+                    <td className="px-2 py-1 font-mono font-medium">{cfg.config_id}</td>
+                    <td className="px-2 py-1 text-gray-700">
+                      <div className="truncate max-w-xs">{(cfg.features || []).join(', ')}</div>
+                    </td>
+                    <td className="px-2 py-1 font-mono text-gray-600">
+                      {Object.entries(cfg.hyperparams || {}).map(([k, v]) => `${k}=${v}`).join(', ') || '—'}
+                    </td>
+                    <td className="px-2 py-1 text-gray-700">{cfg.rationale}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {submitResult && (
+            <div className="mt-3 bg-green-50 border border-green-200 rounded px-3 py-2 text-xs text-green-800">
+              <div className="font-medium">Submitted as factory run <code className="bg-white px-1 rounded">{submitResult.factory_run_id}</code></div>
+              <div className="mt-0.5 text-green-700">{submitResult.next_step}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Dropdown({ label, value, onChange, options }: {
+  label: string; value: string; onChange: (v: string) => void; options: [string, string][];
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">{label}</label>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+        {options.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
+      </select>
     </div>
   );
 }

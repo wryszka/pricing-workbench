@@ -520,6 +520,60 @@ log_audit_event(spark, fqn, factory_run_id, "LEADERBOARD_PUBLISHED", {
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Update mf_run_log — mark the run complete + summary metrics
+# MAGIC
+# MAGIC The Agentic Planner in the app writes a row to `mf_run_log` when a run is
+# MAGIC proposed + submitted. Here we update the status and attach summary metrics
+# MAGIC so the app (and the PDF run-log export) can display the final picture.
+# MAGIC Legacy/manual runs without a planner row are a no-op.
+
+# COMMAND ----------
+
+import json as _json
+from datetime import datetime as _dt, timezone as _tz
+
+def _update_run_log_status(factory_run_id, leaderboard_rows, upt_version):
+    try:
+        # Does the row exist? If not, skip cleanly.
+        exists = spark.sql(
+            f"SELECT 1 FROM {fqn}.mf_run_log WHERE factory_run_id = '{factory_run_id}' LIMIT 1"
+        ).take(1)
+        if not exists:
+            print(f"mf_run_log row not found for {factory_run_id} (legacy/manual run) — skipping.")
+            return
+
+        ginis = [r["gini"] for r in leaderboard_rows if r.get("gini") is not None]
+        aics  = [r["aic"]  for r in leaderboard_rows if r.get("aic")  is not None]
+        summary = {
+            "n_configs_evaluated":     len(leaderboard_rows),
+            "best_gini":               max(ginis) if ginis else None,
+            "median_gini":             (sorted(ginis)[len(ginis) // 2] if ginis else None),
+            "best_aic":                min(aics) if aics else None,
+            "upt_version":             str(upt_version) if upt_version is not None else None,
+            "recommended_for_approval": [
+                r["model_config_id"] for r in leaderboard_rows
+                if r.get("recommended_action") == "RECOMMEND_APPROVE"
+            ],
+        }
+        summary_s = _json.dumps(summary).replace("'", "''")
+        now_s     = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+        spark.sql(f"""
+            UPDATE {fqn}.mf_run_log
+               SET status          = 'COMPLETED',
+                   completed_at    = '{now_s}',
+                   summary_metrics = '{summary_s}'
+             WHERE factory_run_id = '{factory_run_id}'
+        """)
+        print(f"✓ mf_run_log updated for {factory_run_id}: best_gini={summary['best_gini']}")
+    except Exception as e:
+        print(f"Note: mf_run_log update failed (non-fatal): {e}")
+
+_update_run_log_status(factory_run_id, leaderboard_rows, upt_version)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Genie-Ready: Query This Data in Natural Language
 # MAGIC
 # MAGIC All leaderboard data is stored in standard Delta tables that a **Genie room**

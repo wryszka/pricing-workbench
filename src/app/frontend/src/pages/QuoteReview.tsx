@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Search, AlertTriangle, Download, Copy, CheckCircle2, PlayCircle,
-  FileText, BarChart3, MessageCircle, ExternalLink, ArrowUpRight,
+  FileText, BarChart3, MessageCircle,
   Phone, Sparkles, Zap,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import GenieChat from '../components/GenieChat';
 
 type Recent = {
   transaction_id: string; company_name: string; postcode: string; region: string;
@@ -722,10 +723,10 @@ function DistributionChart({ data }: { data: any[] }) {
 // --------------------------------------------------------------------------
 
 function GenieTab({ config }: { config: any }) {
-  const embedUrl = config?.genie_quote_embed_url;
-  const openUrl  = config?.genie_quote_url;
+  const spaceId = config?.genie_quote_space_id;
+  const openUrl = config?.genie_quote_url;
 
-  if (!embedUrl) {
+  if (!spaceId) {
     return (
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
         <h3 className="font-semibold text-amber-800 mb-2">Ask Genie — setup required</h3>
@@ -733,51 +734,23 @@ function GenieTab({ config }: { config: any }) {
           Wire a Databricks Genie space over <code className="bg-white px-1 rounded">quotes</code>,
           then set <code className="bg-white px-1 rounded">GENIE_QUOTE_SPACE_ID</code> in <code className="bg-white px-1 rounded">resources/app.yml</code> and redeploy.
         </p>
-        <ol className="text-sm text-amber-700 list-decimal list-inside space-y-1">
-          <li>Open Genie in the workspace and create a space over <code className="bg-white px-1 rounded">quotes</code>.</li>
-          <li>Short description: <em>Commercial quote stream — transactions, prices, drop-outs, outliers.</em></li>
-          <li>Copy the space ID from the URL and set it in <code className="bg-white px-1 rounded">app.yaml</code>.</li>
-          <li>Redeploy the app.</li>
-        </ol>
       </div>
     );
   }
 
-  const suggestions = [
-    'How many quotes were abandoned last week by channel?',
-    "What's the average gross premium by region for bound policies?",
-    'Show the 10 most expensive quotes and the model version that priced them.',
-    'Which construction type has the highest drop-out rate?',
-  ];
-
   return (
-    <div className="space-y-3">
-      <div className="bg-purple-50 border border-purple-200 rounded-t-lg px-5 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <MessageCircle className="w-5 h-5 text-purple-600" />
-          <div>
-            <h3 className="font-semibold text-purple-800">Ask Genie about the quote stream</h3>
-            <p className="text-xs text-purple-600">Natural-language Q&amp;A over <code className="bg-white px-1 rounded">quotes</code></p>
-          </div>
-        </div>
-        {openUrl && (
-          <a href={openUrl} target="_blank" rel="noopener noreferrer"
-            className="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1">
-            Open full screen <ExternalLink className="w-3 h-3" />
-          </a>
-        )}
-      </div>
-      <div className="bg-white border border-t-0 border-purple-200 rounded-b-lg overflow-hidden">
-        <iframe src={embedUrl} className="w-full border-0" style={{ height: '560px' }}
-          title="Genie — Quote Stream" allow="clipboard-write" />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <span className="text-xs text-gray-400">Try:</span>
-        {suggestions.map((s, i) => (
-          <span key={i} className="text-xs text-purple-600 bg-purple-50 border border-purple-200 rounded px-2 py-0.5">"{s}"</span>
-        ))}
-      </div>
-    </div>
+    <GenieChat
+      spaceId={spaceId}
+      fullScreenUrl={openUrl}
+      height={580}
+      emptyState={<p>Ask questions about the commercial quote stream — transactions, prices, drop-outs, outliers.</p>}
+      suggestions={[
+        'How many quotes were abandoned last week by channel?',
+        "What's the average gross premium by region for bound policies?",
+        'Show the 10 most expensive quotes and their model version.',
+        'Which construction type has the highest drop-out rate?',
+      ]}
+    />
   );
 }
 

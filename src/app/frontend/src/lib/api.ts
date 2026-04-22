@@ -59,6 +59,9 @@ export const api = {
       body: JSON.stringify({ decision, reviewer_notes: notes, conditions }),
     }),
   getAuditTrail: (runId: string) => fetchJson<any[]>(`/models/runs/${runId}/audit`),
+  getRunLog: (runId: string) => fetchJson<any>(`/models/runs/${runId}/log`),
+  downloadRunLogReport: (runId: string) =>
+    `${BASE}/models/runs/${runId}/log/export`,
   downloadModelReport: (runId: string, configId: string) =>
     `${BASE}/models/runs/${runId}/models/${configId}/report`,
   getFeatureProfile: (runId: string) => fetchJson<any[]>(`/models/runs/${runId}/features`),
@@ -73,6 +76,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ question }),
     }),
+
+  // Agentic Model Factory planner
+  analyseFeatures: () => fetchJson<any>('/agent/analyse-features'),
+  proposePlan: (intent: {
+    target: string; model_family: string; feature_scope: string;
+    sweep_size: number; focus: string; note?: string;
+  }) => fetchJson<any>('/agent/propose-plan', {
+    method: 'POST', body: JSON.stringify(intent),
+  }),
+  submitPlan: (payload: {
+    intent: any; plan_summary?: string; configs: any[]; feature_analysis_text?: string;
+  }) => fetchJson<any>('/agent/submit-plan', {
+    method: 'POST', body: JSON.stringify(payload),
+  }),
 
   // Feature Store
   getFeatureStoreStatus: () => fetchJson<any>('/features/status'),

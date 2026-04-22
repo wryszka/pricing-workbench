@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from server.audit import log_audit_event
-from server.pdf_report import build_model_report
+from server.pdf_report import build_model_report, build_factory_run_report
 
 from server.config import fqn, get_current_user
 from server.sql import execute_query
@@ -446,6 +446,87 @@ async def download_model_report(run_id: str, config_id: str):
         entity_id=config_id,
         entity_version=run_id,
         details={"report_type": "model_validation_pdf", "filename": filename},
+    )
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Full factory run log — structured JSON + PDF export
+# ---------------------------------------------------------------------------
+
+@router.get("/runs/{run_id}/log")
+async def get_run_log(run_id: str):
+    """Return the full factory-run record: metadata (from mf_run_log, if the run
+    came from the Agentic Planner), proposed configs, leaderboard, decisions,
+    audit trail. Each source is optional — legacy runs skip the planner metadata."""
+    import json as _json
+
+    errors: dict[str, str] = {}
+
+    async def _safe_query(label: str, sql: str) -> list[dict]:
+        try:
+            return await execute_query(sql)
+        except Exception as e:
+            logger.warning("Run-log sub-query %s failed: %s", label, e)
+            errors[label] = str(e)[:200]
+            return []
+
+    log_rows     = await _safe_query("run_log",     f"SELECT * FROM {fqn('mf_run_log')}            WHERE factory_run_id = '{run_id}' LIMIT 1")
+    configs_raw  = await _safe_query("configs",     f"SELECT * FROM {fqn('mf_training_plan')}      WHERE factory_run_id = '{run_id}'")
+    leaderboard  = await _safe_query("leaderboard", f"SELECT * FROM {fqn('mf_leaderboard')}        WHERE factory_run_id = '{run_id}'")
+    decisions    = await _safe_query("decisions",   f"SELECT * FROM {fqn('mf_actuary_decisions')}  WHERE factory_run_id = '{run_id}'")
+    audit        = await _safe_query("audit",       f"SELECT * FROM {fqn('mf_audit_log')}          WHERE factory_run_id = '{run_id}' LIMIT 100")
+
+    run_log = log_rows[0] if log_rows else None
+
+    # Parse JSON-in-string columns + normalise key for the PDF builder
+    configs: list[dict] = []
+    for r in configs_raw:
+        c = dict(r)
+        for k in ("features", "hyperparams"):
+            v = c.get(k)
+            if isinstance(v, str):
+                try:    c[k] = _json.loads(v)
+                except Exception: pass
+        c["config_id"] = c.pop("model_config_id", None)
+        configs.append(c)
+
+    return {
+        "run_log":     run_log,
+        "configs":     configs,
+        "leaderboard": leaderboard,
+        "decisions":   decisions,
+        "audit":       audit,
+        "errors":      errors,
+    }
+
+
+@router.get("/runs/{run_id}/log/export")
+async def download_run_log_report(run_id: str):
+    """Generate the factory-run PDF — full log of the run, end to end."""
+    data = await get_run_log(run_id)
+    if not data.get("run_log") and not data.get("leaderboard"):
+        raise HTTPException(404, f"No log found for factory run {run_id}")
+
+    pdf_bytes = build_factory_run_report(
+        run_log=data.get("run_log") or {"factory_run_id": run_id},
+        configs=data.get("configs") or [],
+        leaderboard=data.get("leaderboard") or [],
+        decisions=data.get("decisions") or [],
+        audit_events=data.get("audit") or [],
+    )
+
+    filename = f"factory_run_{run_id}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    await log_audit_event(
+        event_type="manual_download",
+        entity_type="factory_run",
+        entity_id=run_id,
+        details={"report_type": "factory_run_pdf", "filename": filename},
     )
 
     return StreamingResponse(

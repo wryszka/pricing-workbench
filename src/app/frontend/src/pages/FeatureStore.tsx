@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Database, Zap, ExternalLink, AlertTriangle, Tag, MessageCircle,
+  Database, Zap, ExternalLink, AlertTriangle, Tag,
   BookOpen, Shield, Loader2, PlayCircle, PauseCircle, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import GenieChat from '../components/GenieChat';
 
 type Feature = {
   feature_name: string;
@@ -216,28 +217,21 @@ export default function FeatureStore() {
         </div>
       )}
 
-      {/* Genie embed */}
-      {config?.genie_embed_url && (
+      {/* Inline Genie chat — uses the Conversation API, not a raw iframe */}
+      {config?.genie_space_id && (
         <div className="mt-6">
-          <div className="bg-purple-50 border border-purple-200 rounded-t-lg px-5 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <MessageCircle className="w-5 h-5 text-purple-600" />
-              <div>
-                <h3 className="font-semibold text-purple-800">Ask Genie about the training feature store</h3>
-                <p className="text-xs text-purple-600">
-                  Natural-language Q&amp;A over the UPT
-                </p>
-              </div>
-            </div>
-            <a href={config.genie_url} target="_blank" rel="noopener noreferrer"
-              className="text-xs text-purple-500 hover:text-purple-700 flex items-center gap-1">
-              Open full screen <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-          <div className="bg-white border border-t-0 border-purple-200 rounded-b-lg overflow-hidden">
-            <iframe src={config.genie_embed_url} className="w-full border-0" style={{ height: '500px' }}
-              title="Genie — Training Feature Store" allow="clipboard-write" />
-          </div>
+          <GenieChat
+            spaceId={config.genie_space_id}
+            fullScreenUrl={config.genie_url}
+            height={560}
+            emptyState={<p>Ask questions about the training feature store. Genie generates SQL against the UPT and returns a result.</p>}
+            suggestions={[
+              "What is the average loss ratio by industry?",
+              "Which construction types have the highest claim counts?",
+              "Show the top 10 postcodes by premium",
+              "How does urban_score correlate with claim_count_5y?",
+            ]}
+          />
         </div>
       )}
     </div>
