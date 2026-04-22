@@ -1,21 +1,42 @@
 # Pricing Workbench — Databricks Accelerator
 
-End-to-end commercial P&C pricing on Databricks, from raw vendor data to live
-pricing decisions with full governance and investigation.
+End-to-end commercial P&C pricing on Databricks, laid out the way a real pricing
+team actually operates — not abstracted into a "data + model" black box.
 
-## What this is
+## The flow, literally
 
-A reusable accelerator showing the complete pricing lifecycle on Databricks:
+```
+External data ─ enrichment ─┐
+  (ONSPD + IMD + market +   │
+   geo + credit bureau)     ├─→ Quote request ─→ Pricing model ─→ Quote response
+                            │     (Jane)          (freq × severity)
+                            │         │
+                            │         └─ if bound ─→ Policy ─ accrues ─→ Claims
+                            │                           │
+                            │                           └─→ Training feature store
+                            └───────────────────────────────┘        │
+                                                                    retrain
+```
 
-- **Medallion architecture:** External data → Bronze → Silver (DLT) → Gold (UPT)
-- **6 pricing models:** GLM frequency/severity, GBM demand/uplift/fraud/retention
-- **Real UK public data enrichment:** ~1.5M English postcodes from ONSPD + IMD 2019 + ONS RUC + coastal flags — feeds `urban_score`, `deprivation_composite`, `is_coastal` and the challenger lift story
-- **Quote Review:** investigation workflow for "why was I charged so much?" — looks up any transaction, shows the three JSON payloads captured from the sales channel and rating engine, replays against today's model, and includes an AI-analyst placeholder for Claude-powered root-cause analysis
-- **New Data Impact study** (`src/new_data_impact/`): standalone 6-notebook track for data scientists/actuaries — demonstrates that real external data materially improves pricing models (Gini 0.11 → 0.25 on a 200K home-insurance portfolio)
-- **HITL app:** React + FastAPI for actuarial review and approval
-- **Real-time serving:** Online Feature Store + Model Serving with auto feature lookup
-- **Full governance:** Audit trail, regulatory PDF export, UC lineage
-- **Optional AI agents:** LLM-assisted model selection, DQ monitor, explainability (off by default)
+- **Training feature store** = policy-keyed Delta table, 50K rows with features at policy inception + observed outcomes. What the GLMs and GBMs learn from. Backed by a promotable online store (Lakebase) for sub-10ms lookups at serving time.
+- **Quote stream** = the serving-time feature shape. Each quote is captured as three JSON payloads in Unity Catalog — sales request, rating-engine call, rating-engine response. Same rows train the Demand GBM.
+- **External data** = joined at both quote and policy time. Includes the real 1.5M English postcode enrichment (ONSPD + IMD 2019 + ONS RUC + coastal flags) so the feature catalog has real lineage, not synthetic stubs.
+- **Feature catalog** = one row per feature in the UPT, with source tables, transformation, owner, regulatory/PII flags. Foundation for feature-level lineage and audit bolt-ons.
+
+## What's in the app
+
+- **External Data** — 4 datasets visible, including the real UK postcode enrichment. HITL approval flow for the synthetic ones.
+- **Quote Review** — transaction lookup, JSON payload view, simulated replay, Claude-backed AI Analyst (placeholder).
+- **Feature Store** — offline Delta + online Lakebase status, promote / pause buttons, **feature catalog** with per-feature provenance.
+- **Model Development** — notebook inventory + challenger panel showing Gini lift per real-UK factor.
+- **Model Factory** — 50-spec GLM factory, leaderboard, governance PDF per model.
+- **Model Deployment** — two scoring paths: new-business (feature vector direct) and renewal (FeatureLookup via online store).
+- **Quote Review Analytics + Genie** — broader pattern analysis across the quote stream.
+- **Monitoring, Governance** — data freshness, DQ, immutable audit log, regulatory export.
+
+## Notebook track for data scientists / actuaries
+
+`src/new_data_impact/` — six standalone notebooks that answer *"does adding real external data actually make pricing models better?"* Standard vs enriched freq+sev GLMs on a 200K portfolio, Claude review agent, governance PDF. Hero numbers: Gini 0.11 → 0.25, Deviance Explained 1.0% → 5.3%.
 
 ## Quick Start
 
@@ -37,15 +58,17 @@ databricks bundle run setup_demo
 databricks bundle run build_postcode_enrichment
 
 # 6. Run pipeline
-databricks bundle run ingest_external_data
-databricks bundle run build_upt
-databricks bundle run train_pricing_models
+databricks bundle run ingest_external_data    # bronze → silver
+databricks bundle run build_upt                # derive_factors → UPT → feature_catalog
+databricks bundle run train_pricing_models     # GLMs + GBMs + challenger comparison
 
 # 7. Sync the notebook track to your Workspace Home folder
 ./scripts/sync_notebooks.sh
 #   → /Workspace/Users/<you>/pricing-workbench/new_data_impact/
 
 # 8. Open the app (URL in Databricks Serving UI)
+#    Promote the Feature Store to the online store (Lakebase) from the
+#    "Feature Store" tab when you want to demo sub-10ms renewal scoring.
 ```
 
 ## Two tracks

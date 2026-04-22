@@ -138,13 +138,33 @@ export default function ModelDeployment() {
         </div>
       )}
 
+      {/* Two scoring paths explainer */}
+      {endpoints.length > 0 && (
+        <div className="mb-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 text-xs text-blue-900">
+          <div className="font-semibold text-blue-800 mb-1 text-sm">Two serving paths — same model, different feature sources</div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <strong>New business (below):</strong> Jane submits a fresh quote form. The front-end
+              sends the full feature vector straight to the endpoint — no policy_id exists yet,
+              so there's no lookup to do. This form below demonstrates that path.
+            </div>
+            <div>
+              <strong>Renewal / shadow pricing:</strong> existing customer with a policy_id. Model
+              was logged with <code className="bg-white px-1 rounded">fe.log_model(FeatureLookup)</code>,
+              so the endpoint fetches the feature vector from the online feature store by policy_id
+              automatically. Promote the Feature Store to online to enable this path end-to-end.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Live Scoring Form */}
       {endpoints.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-5 mb-8">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Test Pricing Model</h3>
-              <p className="text-sm text-gray-500">Send a scoring request to the live endpoint with custom feature values</p>
+              <h3 className="text-lg font-semibold text-gray-900">New-business scoring</h3>
+              <p className="text-sm text-gray-500">Send a fresh feature vector to the endpoint — no policy_id, no FeatureLookup. Jane's scenario.</p>
             </div>
             <button
               onClick={async () => {
@@ -162,7 +182,7 @@ export default function ModelDeployment() {
               disabled={scoring}
               className="px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
             >
-              {scoring ? <><Loader2 className="w-4 h-4 animate-spin" /> Scoring...</> : <><Play className="w-4 h-4" /> Score Policy</>}
+              {scoring ? <><Loader2 className="w-4 h-4 animate-spin" /> Scoring...</> : <><Play className="w-4 h-4" /> Score new quote</>}
             </button>
           </div>
 

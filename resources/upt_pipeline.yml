@@ -31,6 +31,16 @@ resources:
               schema_name: ${var.schema_name}
           environment_key: default
 
+        # Feature catalog — lineage + audit metadata for every UPT feature.
+        # Independent of build_upt (static metadata), runs in parallel.
+        - task_key: build_feature_catalog
+          notebook_task:
+            notebook_path: ../src/03_gold/build_feature_catalog.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
       environments:
         - environment_key: default
           spec:

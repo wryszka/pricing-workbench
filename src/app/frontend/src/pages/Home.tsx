@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
-import { Database, FlaskConical, Zap, Shield, ArrowRight, Receipt, BookOpen, ExternalLink } from 'lucide-react';
+import {
+  Database, FlaskConical, Table2, Shield, ArrowRight, Receipt, BookOpen, ExternalLink,
+  Phone, CheckSquare, AlertTriangle, Clock,
+} from 'lucide-react';
 
 const GITHUB_REPO_URL = 'https://github.com/wryszka/pricing-workbench';
 
@@ -8,14 +11,16 @@ export default function Home() {
     <div className="max-w-7xl mx-auto px-6 py-8">
       {/* Hero */}
       <div className="text-center mb-10">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">P&C Insurance Pricing</h1>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Pricing Workbench</h1>
         <p className="text-lg text-blue-600 font-medium">Databricks Accelerator</p>
-        <p className="text-gray-500 mt-3 max-w-2xl mx-auto">
-          End-to-end pricing data transformation on a single platform: from raw vendor data
-          to live pricing decisions, with full governance, human-in-the-loop approval,
-          and regulatory-grade auditability.
+        <p className="text-gray-500 mt-3 max-w-3xl mx-auto">
+          End-to-end commercial pricing on a single platform. Every step of the real data flow is
+          traceable, auditable, and governed — from the first quote request to the policy renewal.
         </p>
       </div>
+
+      {/* Data flow diagram */}
+      <FlowDiagram />
 
       {/* Section cards */}
       <div className="grid grid-cols-2 gap-5 mb-8">
@@ -23,33 +28,33 @@ export default function Home() {
           to="/datasets"
           icon={Database}
           color="blue"
-          title="Data Ingestion"
-          description="Review, validate and approve external datasets. Upload/download data, analyse pricing impact, and track data quality before merging into the Unified Pricing Table."
-          features={["Delta Live Tables (DLT) expectations", "Shadow pricing simulation", "Manual upload with audit trail"]}
+          title="External Data"
+          description="Reference and vendor data joined into the feature vector at both quote AND policy time: ONS Postcode Directory + IMD 2019, market benchmarks, geospatial hazard, credit bureau. HITL approval flow with DQ checks."
+          features={["1.5M postcode enrichment (real UK data)", "DLT expectations", "Actuary approval gate"]}
+        />
+        <SectionCard
+          to="/quote-review"
+          icon={Receipt}
+          color="red"
+          title="Quote Stream"
+          description="The serving-time feature shape. Every quote — Jane's form, the rating engine call, the pricing response — captured as three JSON payloads. Investigation flow for outliers; training data for the demand model."
+          features={["3 JSON payloads per transaction", "Simulated model replay", "AI-analyst RCA"]}
+        />
+        <SectionCard
+          to="/pricing-table"
+          icon={Table2}
+          color="green"
+          title="Training Feature Store"
+          description="One row per policy, with features at inception plus observed claim outcomes. This is what the frequency and severity GLMs learn from. Promote to the online store for sub-10ms lookups at serving time."
+          features={["Policy-level · 50K rows × 88 features", "Feature catalog + lineage", "Offline ↔ Online toggle"]}
         />
         <SectionCard
           to="/models"
           icon={FlaskConical}
           color="purple"
           title="Model Factory"
-          description="Train, evaluate, and approve pricing models. GLMs for frequency/severity, GBMs for demand and fraud, with regulatory-grade PDF reports."
-          features={["MLflow experiment tracking", "Unity Catalog model registry", "AI-assisted model selection (optional)"]}
-        />
-        <SectionCard
-          to="/pricing-table"
-          icon={Zap}
-          color="green"
-          title="Pricing Table"
-          description="The Unified Pricing Table — single wide table with all features for model training and real-time serving. Query with natural language via Genie."
-          features={["UC Feature Engineering", "Lakebase online store", "Genie natural language queries"]}
-        />
-        <SectionCard
-          to="/quote-review"
-          icon={Receipt}
-          color="red"
-          title="Quote Review"
-          description="Customer calls asking why they were charged so much? Look up the transaction, see the three JSON payloads captured into UC, replay against today's rating engine, and get a Claude-powered recommendation on the root cause."
-          features={["3 JSON payloads per transaction", "One-click model replay", "AI-assisted root cause"]}
+          description="Train, evaluate, and approve pricing models. Frequency GLMs, severity GBMs, demand GBMs. 50-spec factory for Radar-class ranking. MLflow + UC registry with full lineage."
+          features={["MLflow experiment tracking", "Unity Catalog model registry", "AI-assisted model selection"]}
         />
         <SectionCard
           external
@@ -57,7 +62,7 @@ export default function Home() {
           icon={BookOpen}
           color="indigo"
           title="New Data Impact"
-          description="For data scientists and actuaries: six notebooks that answer 'does adding real external data actually make pricing models better?' Builds a ~1.5M postcode enrichment from ONSPD + IMD 2019, trains standard vs enriched models, and quantifies the lift."
+          description="For data scientists and actuaries: six notebooks that answer 'does adding real external data actually make pricing models better?' Builds the ~1.5M postcode enrichment, trains standard vs enriched models, quantifies the lift."
           features={["Gini 0.11 → 0.25", "50-spec Model Factory", "Claude review agent", "Governance PDF"]}
         />
         <SectionCard
@@ -65,8 +70,8 @@ export default function Home() {
           icon={Shield}
           color="amber"
           title="Governance & Audit"
-          description="Complete audit trail from raw data to live pricing. Every decision tracked, every version reproducible, every LLM call logged."
-          features={["Unity Catalog lineage", "Immutable audit log", "Regulatory export (PDF + JSON)"]}
+          description="Complete audit trail across the whole flow — data approvals, feature provenance, model decisions, LLM calls. Regulatory-grade PDF export."
+          features={["Feature catalog + lineage", "Immutable audit log", "Regulatory export (PDF + JSON)"]}
         />
       </div>
 
@@ -76,17 +81,125 @@ export default function Home() {
         <p className="text-sm text-gray-600 mb-3">
           <strong>This is not a Databricks product.</strong> It is an example of what can be built
           on the Databricks platform using standard capabilities (Unity Catalog, Delta Lake, MLflow,
-          Mosaic AI, Databricks Apps). The full source code is available on GitHub — feel free to
-          fork it, adapt it to your own data, and use it as a starting point.
+          Mosaic AI, Databricks Apps, Feature Engineering, Lakebase). The full source code is
+          available on GitHub — feel free to fork it, adapt it to your own data, and use it as a
+          starting point.
         </p>
         <p className="text-sm text-gray-600">
           All company names (Bricksurance SE), policy data, and financial figures are entirely
-          fictional and generated for illustrative purposes. No real customer data is used.
+          fictional and generated for illustrative purposes. No real customer data is used. The
+          postcode enrichment is built from genuine UK public data (ONSPD + IMD 2019 + ONS RUC) —
+          freely available under the Open Government Licence.
         </p>
       </div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Flow diagram — the real data flow, step by step
+// ---------------------------------------------------------------------------
+
+function FlowDiagram() {
+  return (
+    <div className="mb-10 bg-white border border-gray-200 rounded-lg p-6">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">
+        How the data flows
+      </h3>
+      <div className="flex items-stretch gap-2 overflow-x-auto pb-2">
+        <FlowStep
+          icon={Database}
+          title="External data"
+          subtitle="enrichment, joined on postcode + company"
+          color="blue"
+          to="/datasets"
+        />
+        <FlowArrow />
+        <FlowStep
+          icon={Phone}
+          title="Quote request"
+          subtitle="Jane submits — rating factors arrive"
+          color="red"
+          to="/quote-review"
+        />
+        <FlowArrow label="+ enrichment" />
+        <FlowStep
+          icon={Receipt}
+          title="Pricing model"
+          subtitle="feature vector → Freq × Severity → quote"
+          color="purple"
+          to="/deployment"
+        />
+        <FlowArrow label="if bound" />
+        <FlowStep
+          icon={CheckSquare}
+          title="Policy"
+          subtitle="feature snapshot stored"
+          color="green"
+          to="/pricing-table"
+        />
+        <FlowArrow label="+ claims" />
+        <FlowStep
+          icon={AlertTriangle}
+          title="Outcomes"
+          subtitle="claim count + loss observed"
+          color="amber"
+        />
+        <FlowArrow label="feedback" />
+        <FlowStep
+          icon={Clock}
+          title="Retrain"
+          subtitle="training feature store updated"
+          color="indigo"
+          to="/models"
+        />
+      </div>
+      <p className="text-xs text-gray-500 mt-4 leading-relaxed">
+        <strong className="text-gray-700">Training</strong> uses the policy-level feature store
+        (labelled outcomes) to train frequency and severity models.{' '}
+        <strong className="text-gray-700">Serving</strong> runs each new quote's feature vector
+        through the model — looking up existing features via the online store for renewals, or
+        scoring the vector directly for new business.
+      </p>
+    </div>
+  );
+}
+
+function FlowStep({
+  icon: Icon, title, subtitle, color, to,
+}: {
+  icon: any; title: string; subtitle: string; color: string; to?: string;
+}) {
+  const colorMap: Record<string, string> = {
+    blue:   'bg-blue-50 border-blue-200 text-blue-700',
+    red:    'bg-red-50 border-red-200 text-red-700',
+    purple: 'bg-purple-50 border-purple-200 text-purple-700',
+    green:  'bg-green-50 border-green-200 text-green-700',
+    amber:  'bg-amber-50 border-amber-200 text-amber-700',
+    indigo: 'bg-indigo-50 border-indigo-200 text-indigo-700',
+  };
+  const card = (
+    <div className={`w-40 shrink-0 rounded-lg border p-3 ${colorMap[color]} hover:shadow-sm transition-all cursor-${to ? 'pointer' : 'default'}`}>
+      <Icon className="w-4 h-4 mb-1.5" />
+      <div className="text-xs font-semibold text-gray-900 leading-tight">{title}</div>
+      <div className="text-[10px] text-gray-600 mt-0.5 leading-snug">{subtitle}</div>
+    </div>
+  );
+  return to ? <Link to={to} className="block">{card}</Link> : card;
+}
+
+function FlowArrow({ label }: { label?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center shrink-0 pt-4 min-w-[36px]">
+      <ArrowRight className="w-4 h-4 text-gray-400" />
+      {label && <div className="text-[9px] text-gray-400 font-medium mt-0.5 whitespace-nowrap">{label}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section card — supports internal Link or external <a>
+// ---------------------------------------------------------------------------
 
 function SectionCard({ to, icon: Icon, color, title, description, features, external }: {
   to: string; icon: any; color: string; title: string; description: string; features: string[];
@@ -121,9 +234,7 @@ function SectionCard({ to, icon: Icon, color, title, description, features, exte
   );
 
   const className = `block ${c.bg} border ${c.border} rounded-lg p-5 hover:shadow-md transition-all group`;
-
-  if (external) {
-    return <a href={to} target="_blank" rel="noopener noreferrer" className={className}>{body}</a>;
-  }
-  return <Link to={to} className={className}>{body}</Link>;
+  return external
+    ? <a href={to} target="_blank" rel="noopener noreferrer" className={className}>{body}</a>
+    : <Link to={to} className={className}>{body}</Link>;
 }

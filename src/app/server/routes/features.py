@@ -1,14 +1,17 @@
-"""Feature Store status and online store monitoring routes."""
+"""Feature Store status, catalog, and online-store lifecycle routes."""
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from server.config import fqn, get_workspace_client, get_workspace_host
+from server.config import fqn, get_catalog, get_schema, get_workspace_client, get_workspace_host
 from server.sql import execute_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/features", tags=["features"])
+
+ONLINE_STORE_NAME = "pricing-upt-online-store"
+UPT_TABLE_KEY = "unified_pricing_table_live"
 
 
 @router.get("/status")
@@ -110,3 +113,118 @@ async def feature_store_status():
         "online_store": online_store,
         "latency": latency,
     }
+
+
+# ---------------------------------------------------------------------------
+# Feature catalog — metadata for every feature in the training feature store
+# ---------------------------------------------------------------------------
+
+@router.get("/catalog")
+async def feature_catalog():
+    """Return the feature_catalog table — one row per feature with full provenance.
+    Foundation for feature-lineage and audit bolt-ons."""
+    try:
+        rows = await execute_query(f"""
+            SELECT
+                feature_name, feature_group, data_type, description,
+                source_tables, source_columns, transformation, owner,
+                regulatory_sensitive, pii
+            FROM {fqn('feature_catalog')}
+            ORDER BY feature_group, feature_name
+        """)
+        groups: dict = {}
+        for r in rows:
+            g = r.get("feature_group") or "other"
+            groups[g] = groups.get(g, 0) + 1
+        return {
+            "features":    rows,
+            "counts_by_group": groups,
+            "total":       len(rows),
+        }
+    except Exception as e:
+        logger.warning("feature_catalog query failed: %s", e)
+        return {
+            "features": [], "counts_by_group": {}, "total": 0,
+            "error": f"feature_catalog table missing — run build_feature_catalog. ({str(e)[:120]})",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Online store lifecycle — promote (create) / pause (delete)
+# ---------------------------------------------------------------------------
+
+@router.post("/online/promote")
+async def promote_online():
+    """Promote the UPT to the online feature store (Lakebase key-value).
+    Creates the online store if it doesn't exist and kicks off a SNAPSHOT publish
+    of the UPT. Idempotent."""
+    from databricks.sdk.service.ml import OnlineStore, PublishSpec, PublishSpecPublishMode
+
+    upt_table = fqn(UPT_TABLE_KEY)
+    steps = []
+
+    try:
+        w = get_workspace_client()
+
+        # --- Step 1: ensure store exists ---
+        try:
+            store = w.feature_store.get_online_store(ONLINE_STORE_NAME)
+            state = str(store.state).split(".")[-1] if store.state else "UNKNOWN"
+            steps.append(f"Store exists (state: {state}).")
+        except Exception:
+            store = w.feature_store.create_online_store(
+                online_store=OnlineStore(name=ONLINE_STORE_NAME, capacity="CU_1")
+            )
+            state = str(store.state).split(".")[-1] if store.state else "PROVISIONING"
+            steps.append(f"Created online store ({state}) — CU_1 capacity.")
+
+        # --- Step 2: publish UPT to online store (SNAPSHOT) ---
+        try:
+            result = w.feature_store.publish_table(
+                source_table_name=upt_table,
+                publish_spec=PublishSpec(
+                    online_store=ONLINE_STORE_NAME,
+                    online_table_name=upt_table,
+                    publish_mode=PublishSpecPublishMode.SNAPSHOT,
+                ),
+            )
+            steps.append(f"Published {upt_table} to {ONLINE_STORE_NAME} (SNAPSHOT).")
+        except Exception as pub_err:
+            err_s = str(pub_err).lower()
+            if "already" in err_s:
+                steps.append("UPT was already published to the online store.")
+            else:
+                steps.append(f"Publish failed: {str(pub_err)[:200]}")
+
+        return {
+            "status":       "ok",
+            "online_store": ONLINE_STORE_NAME,
+            "state":        state,
+            "steps":        steps,
+            "message":      "Online serving enabled — lookups by policy_id will hit Lakebase.",
+        }
+    except Exception as e:
+        logger.exception("promote_online failed")
+        raise HTTPException(500, f"Promote failed: {str(e)[:300]}")
+
+
+@router.post("/online/pause")
+async def pause_online():
+    """Delete the online feature store to stop cost. The offline UPT is untouched —
+    the online copy can be re-promoted later."""
+    try:
+        w = get_workspace_client()
+        w.feature_store.delete_online_store(ONLINE_STORE_NAME)
+        return {
+            "status":       "deleted",
+            "online_store": ONLINE_STORE_NAME,
+            "message":      "Online store deleted. Offline UPT unchanged. Promote again to re-enable low-latency serving.",
+        }
+    except Exception as e:
+        logger.warning("pause_online — assuming already absent: %s", e)
+        return {
+            "status":       "not_present",
+            "online_store": ONLINE_STORE_NAME,
+            "message":      "Online store was not provisioned; nothing to pause.",
+            "error":        str(e)[:200],
+        }

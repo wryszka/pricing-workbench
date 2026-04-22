@@ -64,6 +64,11 @@ export default function QuoteReview() {
               was sent and received, and <strong>re-runs it against today's pricing model</strong> to
               decide whether the problem is inside the engine or somewhere upstream.
             </p>
+            <p className="text-xs text-blue-700 mt-2 leading-relaxed">
+              <strong>The other role this table plays:</strong> every row in <code className="bg-white px-1 rounded">quotes</code> is
+              also a training example for the Demand GBM — it learns why quotes convert or drop out.
+              The JSON payloads are the exact serving-time feature vector the pricing model consumed.
+            </p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-blue-700">
               <span className="inline-flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />

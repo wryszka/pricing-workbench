@@ -76,6 +76,9 @@ export const api = {
 
   // Feature Store
   getFeatureStoreStatus: () => fetchJson<any>('/features/status'),
+  getFeatureCatalog:     () => fetchJson<any>('/features/catalog'),
+  promoteOnline:         () => fetchJson<any>('/features/online/promote', { method: 'POST', body: JSON.stringify({}) }),
+  pauseOnline:           () => fetchJson<any>('/features/online/pause',   { method: 'POST', body: JSON.stringify({}) }),
 
   // Deployment
   getRegisteredModels: () => fetchJson<any[]>('/deployment/models'),
