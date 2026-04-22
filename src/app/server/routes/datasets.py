@@ -56,6 +56,16 @@ EXTERNAL_DATASETS = {
         "description": "Company financial health: credit score, CCJs, years trading",
         "expected_columns": ["company_id", "policy_id", "credit_score", "ccj_count", "years_trading", "director_changes"],
     },
+    "postcode_enrichment": {
+        "display_name": "Postcode Enrichment (real UK public data)",
+        "source": "ONS Postcode Directory + IMD 2019 + ONS Rural-Urban Classification",
+        "join_key": "postcode (aggregated to postcode area for the UPT)",
+        "raw_table": "postcode_enrichment",
+        "silver_table": "postcode_enrichment",
+        "description": "~1.5M English postcodes with IMD deprivation deciles, urban/rural band, coastal flags. Built by src/new_data_impact/00a. Feeds urban_score, is_coastal, deprivation_composite in the UPT.",
+        "expected_columns": ["postcode", "lsoa_code", "region_code", "is_urban", "is_coastal", "imd_decile", "crime_decile", "income_decile", "health_decile", "living_env_decile"],
+        "is_reference": True,
+    },
 }
 
 
@@ -94,44 +104,53 @@ async def ensure_approvals_table():
 
 @router.get("")
 async def list_datasets():
-    """List all external datasets with their current status."""
+    """List all external datasets with their current status.
+    Reference datasets (is_reference=True) are one-shot builds with no raw→silver
+    split and no approval workflow — they just report a row count."""
     results = []
     for ds_id, ds_info in EXTERNAL_DATASETS.items():
-        # Get row counts and freshness
+        is_reference = bool(ds_info.get("is_reference"))
+        raw_count = silver_count = 0
+        last_ingested = None
+        approval = []
+
         try:
-            raw_stats = await execute_query(f"""
-                SELECT count(*) as row_count,
-                       max(_ingested_at) as last_ingested
-                FROM {fqn(ds_info['raw_table'])}
-            """)
-            silver_stats = await execute_query(f"""
-                SELECT count(*) as row_count
-                FROM {fqn(ds_info['silver_table'])}
-            """)
-            # Get latest approval
-            approval = await execute_query(f"""
-                SELECT decision, reviewer, reviewed_at, reviewer_notes
-                FROM {fqn('dataset_approvals')}
-                WHERE dataset_name = '{ds_id}'
-                ORDER BY reviewed_at DESC
-                LIMIT 1
-            """)
+            if is_reference:
+                # Single-table reference: no _ingested_at, no approval flow
+                stats = await execute_query(f"""
+                    SELECT count(*) as row_count
+                    FROM {fqn(ds_info['silver_table'])}
+                """)
+                raw_count = silver_count = int(stats[0]["row_count"]) if stats else 0
+            else:
+                raw_stats = await execute_query(f"""
+                    SELECT count(*) as row_count,
+                           max(_ingested_at) as last_ingested
+                    FROM {fqn(ds_info['raw_table'])}
+                """)
+                silver_stats = await execute_query(f"""
+                    SELECT count(*) as row_count
+                    FROM {fqn(ds_info['silver_table'])}
+                """)
+                approval = await execute_query(f"""
+                    SELECT decision, reviewer, reviewed_at, reviewer_notes
+                    FROM {fqn('dataset_approvals')}
+                    WHERE dataset_name = '{ds_id}'
+                    ORDER BY reviewed_at DESC
+                    LIMIT 1
+                """)
+                raw_count = int(raw_stats[0]["row_count"]) if raw_stats else 0
+                silver_count = int(silver_stats[0]["row_count"]) if silver_stats else 0
+                last_ingested = raw_stats[0].get("last_ingested") if raw_stats else None
         except Exception as e:
             logger.warning("Failed to query stats for %s: %s", ds_id, e)
-            raw_stats = [{"row_count": "0", "last_ingested": None}]
-            silver_stats = [{"row_count": "0"}]
-            approval = []
-
-        raw_count = int(raw_stats[0]["row_count"]) if raw_stats else 0
-        silver_count = int(silver_stats[0]["row_count"]) if silver_stats else 0
-        last_ingested = raw_stats[0].get("last_ingested") if raw_stats else None
 
         results.append({
             "id": ds_id,
             **ds_info,
             "raw_row_count": raw_count,
             "silver_row_count": silver_count,
-            "rows_dropped_by_dq": raw_count - silver_count,
+            "rows_dropped_by_dq": max(0, raw_count - silver_count),
             "last_ingested": last_ingested,
             "approval": approval[0] if approval else None,
         })
@@ -150,6 +169,14 @@ async def get_dataset_diff(dataset_id: str):
         raise HTTPException(404, f"Unknown dataset: {dataset_id}")
 
     ds = EXTERNAL_DATASETS[dataset_id]
+    if ds.get("is_reference"):
+        return {
+            "is_reference": True,
+            "message": "This is a reference dataset with no raw→silver diff workflow.",
+            "raw_count": 0, "silver_count": 0,
+            "new_rows": [], "changed_rows": [], "removed_rows": [],
+            "summary_stats": {},
+        }
     raw_table = fqn(ds["raw_table"])
     silver_table = fqn(ds["silver_table"])
 
@@ -260,6 +287,12 @@ async def get_dataset_impact(dataset_id: str):
         raise HTTPException(404, f"Unknown dataset: {dataset_id}")
 
     ds = EXTERNAL_DATASETS[dataset_id]
+    if ds.get("is_reference"):
+        return {
+            "is_reference": True,
+            "message": "Reference dataset — feeds derived_factors and the UPT via a postcode-area join, so 'portfolio impact' is best understood through the challenger comparison on the Model Development page.",
+            "policies_affected": 0, "portfolio_change_pct": 0, "risk_summary": [],
+        }
     upt = fqn("unified_pricing_table_live")
     raw = fqn(ds["raw_table"])
     silver = fqn(ds["silver_table"])
@@ -680,6 +713,36 @@ async def get_dataset_quality(dataset_id: str):
         raise HTTPException(404, f"Unknown dataset: {dataset_id}")
 
     ds = EXTERNAL_DATASETS[dataset_id]
+    if ds.get("is_reference"):
+        # Simple coverage checks for the reference table.
+        stats = await execute_query(f"""
+            SELECT
+                COUNT(*)                        AS row_count,
+                COUNT(imd_decile)               AS imd_non_null,
+                COUNT(is_urban)                 AS urban_non_null,
+                COUNT(is_coastal)               AS coastal_non_null,
+                COUNT(DISTINCT region_code)     AS distinct_regions,
+                COUNT(DISTINCT local_authority_code) AS distinct_local_authorities
+            FROM {fqn(ds['silver_table'])}
+        """)
+        s = stats[0] if stats else {}
+        row_count = int(s.get("row_count") or 0)
+        imd_coverage = int(s.get("imd_non_null") or 0)
+        return {
+            "is_reference": True,
+            "raw_count":    row_count,
+            "silver_count": row_count,
+            "last_ingested": None,
+            "coverage": {
+                "imd_decile":    imd_coverage,
+                "is_urban":      int(s.get("urban_non_null") or 0),
+                "is_coastal":    int(s.get("coastal_non_null") or 0),
+                "imd_coverage_pct": (imd_coverage / row_count * 100) if row_count else 0,
+            },
+            "distinct_regions":            int(s.get("distinct_regions") or 0),
+            "distinct_local_authorities":  int(s.get("distinct_local_authorities") or 0),
+            "expectations": [],
+        }
     raw_table = fqn(ds["raw_table"])
     silver_table = fqn(ds["silver_table"])
 
@@ -767,6 +830,8 @@ async def approve_dataset(dataset_id: str, req: ApprovalRequest):
     """Record approval/rejection decision for a dataset version."""
     if dataset_id not in EXTERNAL_DATASETS:
         raise HTTPException(404, f"Unknown dataset: {dataset_id}")
+    if EXTERNAL_DATASETS[dataset_id].get("is_reference"):
+        raise HTTPException(400, "Reference datasets do not use the approval workflow.")
 
     if req.decision not in ("approved", "rejected"):
         raise HTTPException(400, "Decision must be 'approved' or 'rejected'")
@@ -931,6 +996,8 @@ async def validate_upload(dataset_id: str, file: UploadFile = File(...)):
     """Validate an uploaded CSV against the expected schema. Returns a preview."""
     if dataset_id not in EXTERNAL_DATASETS:
         raise HTTPException(404, f"Unknown dataset: {dataset_id}")
+    if EXTERNAL_DATASETS[dataset_id].get("is_reference"):
+        raise HTTPException(400, "Reference datasets are read-only; uploads are not supported.")
 
     ds = EXTERNAL_DATASETS[dataset_id]
     expected_cols = ds["expected_columns"]
