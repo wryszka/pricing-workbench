@@ -1,0 +1,29 @@
+# Apply Metadata — standalone job for re-running descriptions on demand.
+# Idempotent. Run any time you add new tables / models and want the
+# Catalog Explorer story to stay up to date.
+#
+#   databricks bundle run apply_metadata
+
+resources:
+  jobs:
+    apply_metadata:
+      name: "Apply Metadata (tables, columns, volumes, models)"
+      parameters:
+        - name: catalog_name
+          default: ${var.catalog_name}
+        - name: schema_name
+          default: ${var.schema_name}
+
+      tasks:
+        - task_key: apply_metadata
+          notebook_task:
+            notebook_path: ../src/00_setup/apply_metadata.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "5"

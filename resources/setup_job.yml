@@ -33,6 +33,20 @@ resources:
               schema_name: ${var.schema_name}
           environment_key: default
 
+        # Apply descriptions to every table / column / volume / model so the
+        # Catalog Explorer story lands (and feature-lineage bolt-ons have data).
+        # Idempotent — safe to re-run.
+        - task_key: apply_metadata
+          depends_on:
+            - task_key: setup
+            - task_key: setup_quote_stream
+          notebook_task:
+            notebook_path: ../src/00_setup/apply_metadata.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name: ${var.schema_name}
+          environment_key: default
+
       environments:
         - environment_key: default
           spec:
