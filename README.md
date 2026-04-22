@@ -41,7 +41,11 @@ databricks bundle run ingest_external_data
 databricks bundle run build_upt
 databricks bundle run train_pricing_models
 
-# 7. Open the app (URL in Databricks Serving UI)
+# 7. Sync the notebook track to your Workspace Home folder
+./scripts/sync_notebooks.sh
+#   → /Workspace/Users/<you>/pricing-workbench/new_data_impact/
+
+# 8. Open the app (URL in Databricks Serving UI)
 ```
 
 ## Two tracks
