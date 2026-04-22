@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Database, FlaskConical, Zap, Shield, ArrowRight } from 'lucide-react';
+import { Database, FlaskConical, Zap, Shield, ArrowRight, Receipt } from 'lucide-react';
 
 export default function Home() {
   return (
@@ -42,6 +42,14 @@ export default function Home() {
           features={["UC Feature Engineering", "Lakebase online store", "Genie natural language queries"]}
         />
         <SectionCard
+          to="/quote-stream"
+          icon={Receipt}
+          color="red"
+          title="Quote Stream"
+          description="Live quote traffic captured into Unity Catalog. Look up any transaction, view all three JSON payloads, flag outliers, and replay against the rating engine — without copy-pasting JSON out of Notepad."
+          features={["3 JSON payloads per transaction", "Peer-group outlier detection", "One-click simulated replay"]}
+        />
+        <SectionCard
           to="/governance"
           icon={Shield}
           color="amber"
@@ -77,6 +85,7 @@ function SectionCard({ to, icon: Icon, color, title, description, features }: {
     purple: { bg: 'bg-purple-50', border: 'border-purple-200', icon: 'text-purple-600', badge: 'bg-purple-100 text-purple-700' },
     green:  { bg: 'bg-green-50',  border: 'border-green-200',  icon: 'text-green-600',  badge: 'bg-green-100 text-green-700' },
     amber:  { bg: 'bg-amber-50',  border: 'border-amber-200',  icon: 'text-amber-600',  badge: 'bg-amber-100 text-amber-700' },
+    red:    { bg: 'bg-red-50',    border: 'border-red-200',    icon: 'text-red-600',    badge: 'bg-red-100 text-red-700' },
   };
   const c = colorMap[color] || colorMap.blue;
 

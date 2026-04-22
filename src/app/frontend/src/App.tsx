@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Database, Building2, FlaskConical, Zap, Shield, Code, Rocket, Activity, Home as HomeIcon, Table2 } from 'lucide-react';
+import { Database, FlaskConical, Shield, Code, Rocket, Activity, Home as HomeIcon, Table2, Receipt } from 'lucide-react';
 import Home from './pages/Home';
 import DatasetList from './pages/DatasetList';
 import DatasetDetail from './pages/DatasetDetail';
@@ -10,6 +10,7 @@ import ModelFactoryRun from './pages/ModelFactoryRun';
 import ModelDeployment from './pages/ModelDeployment';
 import Monitoring from './pages/Monitoring';
 import Governance from './pages/Governance';
+import QuoteStream from './pages/QuoteStream';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Home', icon: HomeIcon, match: (p: string) => p === '/' },
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { to: '/development', label: 'Model Development', icon: Code, match: (p: string) => p.startsWith('/development') },
   { to: '/models', label: 'Model Factory', icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
   { to: '/deployment', label: 'Model Deployment', icon: Rocket, match: (p: string) => p.startsWith('/deployment') },
+  { to: '/quote-stream', label: 'Quote Stream', icon: Receipt, match: (p: string) => p.startsWith('/quote-stream') },
   { to: '/monitoring', label: 'Monitoring', icon: Activity, match: (p: string) => p.startsWith('/monitoring') },
   { to: '/governance', label: 'Governance', icon: Shield, match: (p: string) => p.startsWith('/governance') },
 ];
@@ -75,6 +77,7 @@ export default function App() {
             <Route path="/models" element={<ModelFactory />} />
             <Route path="/models/:runId" element={<ModelFactoryRun />} />
             <Route path="/deployment" element={<ModelDeployment />} />
+            <Route path="/quote-stream" element={<QuoteStream />} />
             <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/governance" element={<Governance />} />
           </Routes>

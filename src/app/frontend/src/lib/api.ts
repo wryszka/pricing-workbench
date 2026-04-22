@@ -89,4 +89,24 @@ export const api = {
 
   // Governance
   getGovernanceSummary: () => fetchJson<any>('/governance/summary'),
+
+  // Quote Stream
+  getQuoteStreamRecent: (limit: number = 50) =>
+    fetchJson<any[]>(`/quote-stream/recent?limit=${limit}`),
+  getQuoteStreamTransaction: (txId: string) =>
+    fetchJson<any>(`/quote-stream/${encodeURIComponent(txId)}`),
+  replayQuote: (txId: string) =>
+    fetchJson<any>(`/quote-stream/${encodeURIComponent(txId)}/replay`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  saveQuotePayload: (txId: string, kind: string, payload: any) =>
+    fetchJson<any>(`/quote-stream/${encodeURIComponent(txId)}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ payload, kind }),
+    }),
+  getQuoteStreamSummary: () => fetchJson<any>('/quote-stream/analytics/summary'),
+  getQuoteStreamOutliers: () => fetchJson<any[]>('/quote-stream/analytics/outliers'),
+  getQuoteStreamFunnel: () => fetchJson<any[]>('/quote-stream/analytics/funnel'),
+  getQuoteStreamDistribution: () => fetchJson<any[]>('/quote-stream/analytics/distribution'),
 };

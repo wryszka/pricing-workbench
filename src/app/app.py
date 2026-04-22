@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from server.routes import datasets, models, agent, features, deployment, governance
+from server.routes import datasets, models, agent, features, deployment, governance, quote_stream
 import os
 from server.config import get_workspace_host
 
@@ -44,6 +44,7 @@ app.include_router(agent.router)
 app.include_router(features.router)
 app.include_router(deployment.router)
 app.include_router(governance.router)
+app.include_router(quote_stream.router)
 
 
 @app.get("/api/health")
@@ -55,11 +56,15 @@ async def health():
 async def config():
     host = get_workspace_host()
     genie_id = os.getenv("GENIE_SPACE_ID", "")
+    genie_quote_id = os.getenv("GENIE_QUOTE_SPACE_ID", "")
     return {
         "workspace_host": host,
         "genie_space_id": genie_id,
         "genie_url": f"{host}/genie/rooms/{genie_id}" if genie_id else None,
         "genie_embed_url": f"{host}/embed/genie/rooms/{genie_id}" if genie_id else None,
+        "genie_quote_space_id": genie_quote_id,
+        "genie_quote_url": f"{host}/genie/rooms/{genie_quote_id}" if genie_quote_id else None,
+        "genie_quote_embed_url": f"{host}/embed/genie/rooms/{genie_quote_id}" if genie_quote_id else None,
     }
 
 
