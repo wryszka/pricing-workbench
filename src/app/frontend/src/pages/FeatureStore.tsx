@@ -211,7 +211,9 @@ function DashboardTab({ dashboardId, host }: { dashboardId?: string; host?: stri
         src={embedUrl}
         title="Modelling Mart — Overview"
         className="w-full rounded-lg border border-gray-200 bg-white"
-        style={{ height: 1400 }}
+        // Two-page dashboard. The user switches pages via the top-of-dashboard
+        // tabs; each page sits around 900px. Pick the larger so no clipping.
+        style={{ height: 1000 }}
       />
     </div>
   );
