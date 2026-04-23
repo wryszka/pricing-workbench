@@ -1,0 +1,77 @@
+# Production model training — Scene A for governance.
+# Trains 4 current champions in parallel, then backdates 11 historical
+# versions per model in a second task.
+resources:
+  jobs:
+    production_training:
+      name: "v1 — Train production pricing models (Scene A)"
+      parameters:
+        - name: catalog_name
+          default: ${var.catalog_name}
+        - name: schema_name
+          default: ${var.schema_name}
+
+      tasks:
+        - task_key: train_freq_glm
+          notebook_task:
+            notebook_path: ../src/04_models/production/freq_glm.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name:  ${var.schema_name}
+              run_name:     champion
+          environment_key: ml_glm
+
+        - task_key: train_sev_glm
+          notebook_task:
+            notebook_path: ../src/04_models/production/sev_glm.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name:  ${var.schema_name}
+              run_name:     champion
+          environment_key: ml_glm
+
+        - task_key: train_demand_gbm
+          notebook_task:
+            notebook_path: ../src/04_models/production/demand_gbm.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name:  ${var.schema_name}
+              run_name:     champion
+          environment_key: ml_gbm
+
+        - task_key: train_fraud_gbm
+          notebook_task:
+            notebook_path: ../src/04_models/production/fraud_gbm.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name:  ${var.schema_name}
+              run_name:     champion
+          environment_key: ml_gbm
+
+        - task_key: backdate_versions
+          depends_on:
+            - task_key: train_freq_glm
+            - task_key: train_sev_glm
+            - task_key: train_demand_gbm
+            - task_key: train_fraud_gbm
+          notebook_task:
+            notebook_path: ../src/04_models/production/backdate_versions.py
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              schema_name:  ${var.schema_name}
+          environment_key: ml_gbm
+
+      environments:
+        - environment_key: ml_glm
+          spec:
+            client: "5"
+            dependencies:
+              - statsmodels
+              - databricks-feature-engineering
+        - environment_key: ml_gbm
+          spec:
+            client: "5"
+            dependencies:
+              - lightgbm
+              - shap
+              - databricks-feature-engineering

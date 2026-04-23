@@ -223,58 +223,91 @@ async def open_notebook(req: OpenRequest) -> dict:
 
 @router.get("/recent-runs")
 async def recent_runs(limit: int = 10) -> dict:
-    """Pull the most recent MLflow runs across any experiment whose path contains
-    'pricing_workbench'. Uses the workspace-client's MLflow helper."""
-    try:
-        w = get_workspace_client()
-        # Find matching experiments
-        from mlflow.tracking import MlflowClient
-        mlclient = MlflowClient()
-        exps = mlclient.search_experiments(
-            filter_string="name LIKE '%pricing_workbench%'",
-            max_results=50,
-        )
-    except Exception as e:
-        logger.warning("recent_runs: could not list experiments: %s", e)
-        return {"runs": [], "error": str(e)[:300]}
+    """Recent training events across the 4 production model families.
 
-    if not exps:
-        return {"runs": []}
+    Reads from the unified `audit_log` table (every training notebook logs a
+    `model_trained` event with the MLflow run_id and metrics). We use SQL here
+    rather than MLflow's workspace APIs because the app service principal
+    doesn't have workspace-folder read rights on personal MLflow experiments —
+    audit events on Unity Catalog tables are the reliable source of truth.
+    """
+    import json as _json
+    from server.sql import execute_query
+    from server.config import fqn
 
-    try:
-        runs = mlclient.search_runs(
-            experiment_ids = [e.experiment_id for e in exps],
-            order_by       = ["attributes.start_time DESC"],
-            max_results    = int(limit),
-        )
-    except Exception as e:
-        logger.warning("recent_runs: search_runs failed: %s", e)
-        return {"runs": [], "error": str(e)[:300]}
-
+    limit = max(1, min(50, int(limit)))
     host = get_workspace_host()
+
+    try:
+        rows = await execute_query(f"""
+            SELECT event_id, entity_id, entity_version, user_id, timestamp, details
+            FROM {fqn('audit_log')}
+            WHERE event_type = 'model_trained'
+              AND entity_id IN ('freq_glm','sev_glm','demand_gbm','fraud_gbm')
+            ORDER BY timestamp DESC
+            LIMIT {limit}
+        """)
+    except Exception as e:
+        logger.warning("recent_runs: audit_log query failed: %s", e)
+        return {"runs": [], "error": str(e)[:300]}
+
+    EXP_ID_BY_FAMILY = {
+        "freq_glm":   "4011604052526442",
+        "sev_glm":    "4011604052526439",
+        "demand_gbm": "4011604052526440",
+        "fraud_gbm":  "4011604052526441",
+    }
+
     out = []
-    exp_by_id = {e.experiment_id: e for e in exps}
-    for r in runs:
-        exp = exp_by_id.get(r.info.experiment_id)
-        metrics = r.data.metrics or {}
-        # Pick the most "interesting" metric to surface on the row — Gini / RMSE
-        # / AUC in that priority order. Runs without any of these show "—".
+    for r in rows:
+        fam = r.get("entity_id")
+        ver = r.get("entity_version") or "—"
+        ts  = r.get("timestamp")
+        details_raw = r.get("details") or "{}"
+        try:
+            det = _json.loads(details_raw) if isinstance(details_raw, str) else (details_raw or {})
+        except Exception:
+            det = {}
+
+        # Pick a key metric from the audit details (GLMs log gini + mae_gbp,
+        # GBMs log auc + gini).
         key_metric = None
-        for candidate in ("gini", "gini_on_incurred", "rmse", "auc", "aic"):
-            if candidate in metrics:
-                key_metric = {"name": candidate, "value": round(float(metrics[candidate]), 4)}
+        for candidate in ("gini", "auc", "mae_gbp", "aic", "rmse"):
+            if candidate in det and isinstance(det[candidate], (int, float)):
+                key_metric = {"name": candidate, "value": round(float(det[candidate]), 4)}
                 break
 
+        run_name = f"{fam}_{ver}" if ver != "—" else fam
+        exp_id = EXP_ID_BY_FAMILY.get(fam)
+        run_id = det.get("mlflow_run_id") or ""
+        # Even without the MLflow run_id, we can link to the experiment.
+        url = None
+        if host and exp_id:
+            if run_id:
+                url = f"{host}/ml/experiments/{exp_id}/runs/{run_id}"
+            else:
+                url = f"{host}/ml/experiments/{exp_id}"
+
+        # audit_log timestamps come back as strings like '2026-04-23 09:07:12.345'
+        start_iso = None
+        if ts:
+            try:
+                start_iso = str(ts).replace(" ", "T")
+            except Exception:
+                pass
+
         out.append({
-            "run_id":         r.info.run_id,
-            "run_name":       r.data.tags.get("mlflow.runName") or r.info.run_name or "(unnamed)",
-            "experiment_id":  r.info.experiment_id,
-            "experiment_name":(exp.name if exp else None),
-            "status":         r.info.status,
-            "start_time":     datetime.fromtimestamp((r.info.start_time or 0) / 1000).isoformat() if r.info.start_time else None,
-            "user":           r.data.tags.get("mlflow.user"),
+            "run_id":         run_id or r.get("event_id"),
+            "run_name":       run_name,
+            "experiment_id":  exp_id,
+            "experiment_name": f"pricing_workbench_production_{fam.split('_')[0]}",
+            "status":         "FINISHED",
+            "start_time":     start_iso,
+            "user":           r.get("user_id"),
             "key_metric":     key_metric,
-            "url":            f"{host}/ml/experiments/{r.info.experiment_id}/runs/{r.info.run_id}",
+            "url":            url,
+            "simulated":      bool(det.get("simulated")),
+            "story":          det.get("story"),
         })
 
-    return {"runs": out, "experiments_matched": len(exps)}
+    return {"runs": out, "source": "audit_log"}

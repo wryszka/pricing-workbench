@@ -1,17 +1,68 @@
 import { useEffect, useState } from 'react';
 import {
-  Code, ExternalLink, FlaskConical, GitCompare, ChevronDown, Library, Clock,
-  ArrowUpRight,
+  Code, ExternalLink, FlaskConical, ChevronDown, Library, Clock,
+  FlaskRound, ShieldCheck, GitCompare,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import ReviewPromote from './ReviewPromote';
+import CompareTest from './CompareTest';
 
 const GITHUB_REPO_URL = 'https://github.com/wryszka/pricing-workbench';
 
+type Tab = 'train' | 'compare' | 'review';
+
 export default function ModelDevelopment() {
+  const [tab, setTab] = useState<Tab>('train');
+
+  return (
+    <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* Header */}
+      <div className="mb-4">
+        <h2 className="text-2xl font-bold text-gray-900">Model Development</h2>
+        <p className="text-gray-500 mt-1">
+          Where actuaries and data scientists build and review pricing models.
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-gray-200 mb-6">
+        <TabButton active={tab === 'train'}   onClick={() => setTab('train')}
+                   icon={<FlaskRound className="w-4 h-4" />} label="Train" />
+        <TabButton active={tab === 'compare'} onClick={() => setTab('compare')}
+                   icon={<GitCompare className="w-4 h-4" />} label="Compare & Test" />
+        <TabButton active={tab === 'review'}  onClick={() => setTab('review')}
+                   icon={<ShieldCheck className="w-4 h-4" />} label="Promote" />
+      </div>
+
+      {tab === 'train'   && <TrainTab />}
+      {tab === 'compare' && <CompareTest />}
+      {tab === 'review'  && <ReviewPromote />}
+    </div>
+  );
+}
+
+function TabButton({ active, onClick, icon, label }:
+  { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button onClick={onClick}
+            className={`px-4 py-2 text-sm font-medium rounded-t-lg inline-flex items-center gap-2 -mb-px border-b-2 transition ${
+              active
+                ? 'border-blue-600 text-blue-700 bg-white'
+                : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+            }`}>
+      {icon} {label}
+    </button>
+  );
+}
+
+// ===========================================================================
+// Train tab — the original Model Development content, unchanged.
+// ===========================================================================
+
+function TrainTab() {
   const [notebooks,   setNotebooks]  = useState<any[]>([]);
   const [libraries,   setLibraries]  = useState<any[]>([]);
   const [recentRuns,  setRecentRuns] = useState<any[]>([]);
-  const [challenger,  setChallenger] = useState<any>(null);
   const [config,      setConfig]     = useState<any>(null);
   const [opening,     setOpening]    = useState<string | null>(null);
   const [showLibs,    setShowLibs]   = useState(false);
@@ -23,7 +74,6 @@ export default function ModelDevelopment() {
       setLibraries(d.libraries || []);
     }).catch(() => {});
     api.getRecentMlflowRuns(10).then((d: any) => setRecentRuns(d.runs || [])).catch(() => {});
-    api.getChallengerComparison().then(setChallenger).catch(() => {});
     api.getConfig().then(setConfig).catch(() => {});
   }, []);
 
@@ -44,12 +94,11 @@ export default function ModelDevelopment() {
   const workspaceHost = config?.workspace_host || '';
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8">
-      {/* Header */}
+    <div>
+      {/* Intro */}
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Model Development</h2>
-        <p className="text-gray-500 mt-1">
-          Where actuaries and data scientists build pricing models. Every notebook reads the Modelling Mart, runs on serverless ML compute, and logs to MLflow for governance.
+        <p className="text-gray-500">
+          Every notebook reads the Modelling Mart, runs on serverless ML compute, and logs to MLflow for governance.
         </p>
       </div>
 
@@ -95,9 +144,6 @@ export default function ModelDevelopment() {
           </div>
         )}
       </section>
-
-      {/* Proof of lift — preserved from the old page, this is high-value actuarial content */}
-      <ChallengerPanel data={challenger} />
 
       {/* Recent MLflow runs — live */}
       <section className="mb-6 bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -286,112 +332,3 @@ function formatRelative(iso?: string): string {
   return `${days}d ago`;
 }
 
-// -------------------------------------------------------------
-// Challenger comparison: baseline vs +urban_score vs +both factors.
-// Preserved from the previous version of this page — this is high-
-// value actuarial content showing lift attribution per factor.
-// -------------------------------------------------------------
-
-function ChallengerPanel({ data }: { data: any }) {
-  if (!data || !data.cohorts || data.cohorts.length === 0) {
-    return (
-      <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-5">
-        <div className="flex items-center gap-2 mb-1">
-          <GitCompare className="w-5 h-5 text-amber-600" />
-          <h3 className="font-semibold text-amber-800">Adding factors → model lift</h3>
-        </div>
-        <p className="text-sm text-amber-700">
-          Run <code className="bg-white px-1.5 py-0.5 rounded text-xs">src/04_models/challenger_comparison.py</code>{' '}
-          to populate this panel. It trains baseline vs +urban_score vs +both, and attributes
-          the Gini lift to each derived factor.
-        </p>
-      </div>
-    );
-  }
-
-  const baseline = data.baseline_gini || 0;
-  const fullGini = data.full_gini || data.plus_both_gini || 0;
-  const totalLift = data.total_lift || 0;
-  const totalLiftPct = data.total_lift_pct || 0;
-  const attribution = data.attribution || [];
-  const cohorts = data.cohorts || [];
-  const positive = totalLift >= 0;
-
-  return (
-    <div className="mb-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
-      <div className="px-5 py-3 bg-emerald-50 border-b border-emerald-200 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <GitCompare className="w-5 h-5 text-emerald-700" />
-          <div>
-            <h3 className="font-semibold text-emerald-800">Adding real UK data → model lift</h3>
-            <p className="text-xs text-emerald-700">
-              Baseline vs challenger with real ONSPD / IMD / coastal factors — Gini on held-out sample
-            </p>
-          </div>
-        </div>
-        <span className="text-xs text-gray-500">
-          Modelling Mart v{data.upt_delta_version ?? '—'}
-        </span>
-      </div>
-
-      <div className="p-5 grid grid-cols-3 gap-4">
-        <GiniCard label="Baseline (synthetic features)" value={baseline} />
-        <GiniCard label={`Full challenger (${cohorts.length} cohorts)`} value={fullGini} delta={fullGini - baseline} highlight />
-        <div className={`rounded-lg p-3 border ${positive ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-          <div className="text-xs text-gray-500">Total lift</div>
-          <div className={`text-2xl font-bold mt-1 ${positive ? 'text-green-700' : 'text-red-700'}`}>
-            {positive ? '+' : ''}{totalLift.toFixed(4)}
-          </div>
-          <div className={`text-xs mt-0.5 ${positive ? 'text-green-600' : 'text-red-600'}`}>
-            {positive ? '+' : ''}{totalLiftPct.toFixed(2)}% vs baseline
-          </div>
-        </div>
-      </div>
-
-      <div className="px-5 pb-5">
-        <div className="text-xs font-medium text-gray-600 mb-2">Lift attribution</div>
-        <div className="space-y-1.5">
-          {attribution.map((a: any) => {
-            const share = Math.max(0, Math.min(100, a.share_pct || 0));
-            return (
-              <div key={a.factor} className="flex items-center gap-3">
-                <div className="w-60 text-xs font-mono text-gray-700">{a.factor}</div>
-                <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                  <div className="bg-emerald-500 h-full" style={{ width: `${share}%` }} />
-                </div>
-                <div className="w-32 text-right text-xs text-gray-600">
-                  <span className="font-medium">{a.lift >= 0 ? '+' : ''}{Number(a.lift).toFixed(4)}</span>
-                  <span className="text-gray-400 ml-1">({share.toFixed(0)}% share)</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="flex items-center justify-between mt-3 text-xs text-gray-500">
-          <div>Ablation: each factor's lift is the Gini delta when it's added to the previous model.</div>
-          <a href={`${GITHUB_REPO_URL}/blob/main/src/04_models/challenger_comparison.py`}
-            target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 font-medium">
-            View challenger_comparison.py <ArrowUpRight className="w-3 h-3" />
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GiniCard({ label, value, delta, highlight }: { label: string; value: number; delta?: number; highlight?: boolean }) {
-  return (
-    <div className={`rounded-lg p-3 border ${highlight ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 border-gray-200'}`}>
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className={`text-2xl font-bold mt-1 ${highlight ? 'text-emerald-700' : 'text-gray-800'}`}>
-        {value.toFixed(4)}
-      </div>
-      {delta !== undefined && (
-        <div className={`text-xs mt-0.5 ${delta >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-          {delta >= 0 ? '+' : ''}{delta.toFixed(4)}
-        </div>
-      )}
-    </div>
-  );
-}

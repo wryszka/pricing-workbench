@@ -48,48 +48,64 @@ export const api = {
   },
   getUploadHistory: (id: string) => fetchJson<any[]>(`/datasets/${id}/uploads`),
 
-  // Model Factory routes
-  getFactoryRuns: () => fetchJson<any[]>('/models/runs'),
-  getLeaderboard: (runId: string) => fetchJson<any[]>(`/models/runs/${runId}/leaderboard`),
-  getModelDetail: (runId: string, configId: string) =>
-    fetchJson<any>(`/models/runs/${runId}/models/${configId}`),
-  decideModel: (runId: string, configId: string, decision: string, notes: string, conditions: string) =>
-    fetchJson<any>(`/models/runs/${runId}/models/${configId}/decide`, {
-      method: 'POST',
-      body: JSON.stringify({ decision, reviewer_notes: notes, conditions }),
-    }),
-  getAuditTrail: (runId: string) => fetchJson<any[]>(`/models/runs/${runId}/audit`),
-  getRunLog: (runId: string) => fetchJson<any>(`/models/runs/${runId}/log`),
-  downloadRunLogReport: (runId: string) =>
-    `${BASE}/models/runs/${runId}/log/export`,
-  downloadModelReport: (runId: string, configId: string) =>
-    `${BASE}/models/runs/${runId}/models/${configId}/report`,
-  getFeatureProfile: (runId: string) => fetchJson<any[]>(`/models/runs/${runId}/features`),
-  getChallengerComparison: () => fetchJson<any>('/models/challenger'),
-
-  // Agents (optional AI assistants)
-  getAgentStatus: () => fetchJson<any>('/agent/status'),
-  runAgentAnalysis: () => fetchJson<any>('/agent/analyze', { method: 'POST' }),
-  runDqMonitor: () => fetchJson<any>('/agent/dq-monitor', { method: 'POST' }),
+  // Agent (plain-English explainability for dataset diffs)
   runExplainability: (question: string) =>
     fetchJson<any>('/agent/explain', {
       method: 'POST',
       body: JSON.stringify({ question }),
     }),
 
-  // Agentic Model Factory planner
-  analyseFeatures: () => fetchJson<any>('/agent/analyse-features'),
-  proposePlan: (intent: {
-    target: string; model_family: string; feature_scope: string;
-    sweep_size: number; focus: string; note?: string;
-  }) => fetchJson<any>('/agent/propose-plan', {
-    method: 'POST', body: JSON.stringify(intent),
-  }),
-  submitPlan: (payload: {
-    intent: any; plan_summary?: string; configs: any[]; feature_analysis_text?: string;
-  }) => fetchJson<any>('/agent/submit-plan', {
-    method: 'POST', body: JSON.stringify(payload),
-  }),
+  // Model Factory (new)
+  factoryPropose: (family: string) =>
+    fetchJson<any>('/factory/plan', {
+      method: 'POST', body: JSON.stringify({ family }),
+    }),
+  factoryApprove: (family: string, plan: any[], narrative: string) =>
+    fetchJson<any>('/factory/approve', {
+      method: 'POST', body: JSON.stringify({ family, plan, narrative }),
+    }),
+  factoryGetRun: (runId: string) =>
+    fetchJson<any>(`/factory/runs/${encodeURIComponent(runId)}`),
+  factoryLeaderboard: (runId: string) =>
+    fetchJson<any>(`/factory/runs/${encodeURIComponent(runId)}/leaderboard`),
+  factoryShortlist: (runId: string) =>
+    fetchJson<any>(`/factory/runs/${encodeURIComponent(runId)}/shortlist`),
+  factoryPortfolio: (runId: string) =>
+    fetchJson<any>(`/factory/runs/${encodeURIComponent(runId)}/portfolio`),
+  factoryChat: (runId: string, question: string) =>
+    fetchJson<any>('/factory/chat', {
+      method: 'POST', body: JSON.stringify({ run_id: runId, question }),
+    }),
+  factoryPromoteVariant: (runId: string, variantId: string) =>
+    fetchJson<any>(`/factory/runs/${encodeURIComponent(runId)}/variants/${encodeURIComponent(variantId)}/pack`, {
+      method: 'POST', body: JSON.stringify({}),
+    }),
+  factoryRecentRuns: (limit = 5) =>
+    fetchJson<any>(`/factory/runs?limit=${limit}`),
+
+  // Model Factory — Real (second tab)
+  factoryRealPropose: (family: string, maxVariants?: number) =>
+    fetchJson<any>('/factory-real/plan', {
+      method: 'POST', body: JSON.stringify({ family, max_variants: maxVariants }),
+    }),
+  factoryRealApprove: (family: string, plan: any[], narrative: string) =>
+    fetchJson<any>('/factory-real/approve', {
+      method: 'POST', body: JSON.stringify({ family, plan, narrative }),
+    }),
+  factoryRealGetRun: (runId: string) =>
+    fetchJson<any>(`/factory-real/runs/${encodeURIComponent(runId)}`),
+  factoryRealLeaderboard: (runId: string) =>
+    fetchJson<any>(`/factory-real/runs/${encodeURIComponent(runId)}/leaderboard`),
+  factoryRealShortlist: (runId: string) =>
+    fetchJson<any>(`/factory-real/runs/${encodeURIComponent(runId)}/shortlist`),
+  factoryRealChat: (runId: string, question: string) =>
+    fetchJson<any>('/factory-real/chat', {
+      method: 'POST', body: JSON.stringify({ run_id: runId, question }),
+    }),
+  factoryRealPromoteVariant: (runId: string, variantId: string) =>
+    fetchJson<any>(`/factory-real/runs/${encodeURIComponent(runId)}/variants/${encodeURIComponent(variantId)}/pack`, {
+      method: 'POST', body: JSON.stringify({}),
+    }),
 
   // Model Development
   getDevelopmentNotebooks: () => fetchJson<any>('/development/notebooks'),
@@ -97,6 +113,42 @@ export const api = {
   openNotebook:            (notebookId: string) => fetchJson<any>('/development/open-notebook', {
     method: 'POST', body: JSON.stringify({ notebook_id: notebookId }),
   }),
+
+  // Review & Promote
+  getReviewFamilies:       () => fetchJson<any>('/review/families'),
+  getReviewVersions:       (family: string) =>
+    fetchJson<any>(`/review/families/${family}/versions`),
+  getReviewVersionDetail:  (family: string, version: number | string) =>
+    fetchJson<any>(`/review/families/${family}/versions/${version}`),
+  getReviewExplainability: (family: string, version: number | string) =>
+    fetchJson<any>(`/review/families/${family}/versions/${version}/explainability`),
+  getReviewArtifactUrl:    (family: string, version: number | string, path: string) =>
+    `${BASE}/review/families/${family}/versions/${version}/artifact?path=${encodeURIComponent(path)}`,
+  generateGovernancePack:  (family: string, version: number | string) =>
+    fetchJson<any>('/review/packs/generate', {
+      method: 'POST',
+      body: JSON.stringify({ family, version: String(version) }),
+    }),
+  getPackRunStatus:        (runId: number | string) =>
+    fetchJson<any>(`/review/packs/runs/${runId}`),
+  listGovernancePacks:     (family?: string, limit = 25) =>
+    fetchJson<any>(`/review/packs?limit=${limit}${family ? `&family=${family}` : ''}`),
+  downloadPackUrl:         (packId: string) =>
+    `${BASE}/review/packs/${encodeURIComponent(packId)}/download`,
+
+  // Compare & Test
+  listCompareScenarios:    (family?: string) =>
+    fetchJson<any>(`/compare/scenarios${family ? `?family=${family}` : ''}`),
+  triggerCompareRun:       (body: { family: string; versions: (string | number)[]; portfolio_size: number; scenario_id: string }) =>
+    fetchJson<any>('/compare/run', { method: 'POST', body: JSON.stringify({
+      ...body, versions: body.versions.map(String),
+    }) }),
+  getCompareRunStatus:     (runId: number | string) =>
+    fetchJson<any>(`/compare/runs/${runId}`),
+  getCompareCache:         (cacheKey: string) =>
+    fetchJson<any>(`/compare/cache/${encodeURIComponent(cacheKey)}`),
+  getCompareHistory:       (limit = 10) =>
+    fetchJson<any>(`/compare/history?limit=${limit}`),
 
   // Modelling Mart
   getFeatureStoreStatus: () => fetchJson<any>('/features/status'),
@@ -109,16 +161,27 @@ export const api = {
 
   // Deployment
   getRegisteredModels: () => fetchJson<any[]>('/deployment/models'),
-  getServingEndpoints: () => fetchJson<any[]>('/deployment/endpoints'),
-  getEndpointLatency: () => fetchJson<any>('/deployment/latency'),
-  scoreModel: (endpointName: string, features: Record<string, number>) =>
-    fetchJson<any>('/deployment/score', {
-      method: 'POST',
-      body: JSON.stringify({ endpoint_name: endpointName, features }),
+  getChampions: () => fetchJson<any>('/deployment/champions'),
+  getChampionHistory: (family: string, limit = 10) =>
+    fetchJson<any>(`/deployment/champions/${family}/history?limit=${limit}`),
+  rollbackChampion: (family: string, note: string) =>
+    fetchJson<any>('/deployment/rollback', {
+      method: 'POST', body: JSON.stringify({ family, note }),
     }),
 
   // Governance
   getGovernanceSummary: () => fetchJson<any>('/governance/summary'),
+  listAllPacks:         () => fetchJson<any>('/governance/packs'),
+  getPacksOnDate:       (date: string) => fetchJson<any>(`/governance/packs/by-date?date=${date}`),
+  getPackDetail:        (packId: string) => fetchJson<any>(`/governance/packs/${encodeURIComponent(packId)}`),
+  packPdfUrl:           (packId: string) => `${BASE}/governance/packs/${encodeURIComponent(packId)}/pdf`,
+  getPackText:          (packId: string) => fetchJson<any>(`/governance/packs/${encodeURIComponent(packId)}/text`),
+  getPolicyScoring:     (policyId: string) => fetchJson<any>(`/governance/policy/${encodeURIComponent(policyId)}/scoring`),
+  chatWithPack:         (packId: string, question: string, policyId?: string) =>
+    fetchJson<any>('/governance/chat', {
+      method: 'POST',
+      body: JSON.stringify({ pack_id: packId, question, policy_id: policyId }),
+    }),
 
   // Quote Stream
   getQuoteStreamRecent: (limit: number = 50) =>

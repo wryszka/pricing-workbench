@@ -1,282 +1,698 @@
-import { useEffect, useState } from 'react';
-import { Shield, Clock, Database, Activity, Bot, CheckCircle2, AlertTriangle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
+import {
+  Shield, Layers, Calendar, Search, Loader2, MessageSquare,
+  Bot, Send, ChevronDown, Sparkles, ExternalLink, Eye, EyeOff,
+  AlertTriangle, UserCircle2, BookOpen,
+} from 'lucide-react';
 import { api } from '../lib/api';
 
-export default function Governance() {
-  // DQ Agent state
-  const [dqResult, setDqResult] = useState<any>(null);
-  const [dqLoading, setDqLoading] = useState(false);
-  const [dqExpanded, setDqExpanded] = useState(false);
+type Pack = {
+  pack_id: string;
+  model_family: string;
+  model_version: string;
+  story?: string;
+  simulated?: boolean | null;
+  primary_metric?: string;
+  primary_value?: number | null;
+  pdf_path?: string;
+  size_bytes?: number;
+  generated_by?: string;
+  generated_at?: string;
+};
+type FamilyPacks = { key: string; label: string; packs: Pack[] };
+type Mode = 'by-model' | 'by-date' | 'by-policy';
 
-  const runDqAgent = async () => {
-    setDqLoading(true);
-    try { setDqResult(await api.runDqMonitor()); } catch (e: any) { setDqResult({ success: false, error: e.message }); }
-    finally { setDqLoading(false); }
-  };
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+export default function Governance() {
+  const [mode, setMode]         = useState<Mode>('by-model');
+  const [familyPacks, setFam]   = useState<FamilyPacks[]>([]);
+  const [selectedPack, setPack] = useState<Pack | null>(null);
+  const [policyContext, setPolicyContext] = useState<{ policy_id: string } | null>(null);
 
   useEffect(() => {
-    api.getGovernanceSummary().then(setData).finally(() => setLoading(false));
+    api.listAllPacks().then(d => setFam(d.families || []));
   }, []);
-
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading governance data...</div>;
-  if (!data) return <div className="p-8 text-center text-red-500">Failed to load</div>;
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Governance & Audit</h2>
-        <p className="text-gray-500 mt-1">End-to-end traceability — from raw data to live pricing</p>
-      </div>
-
-      {/* What this demonstrates */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-5 mb-6">
-        <h3 className="font-semibold text-blue-800 mb-2">What this demonstrates</h3>
-        <p className="text-sm text-blue-600">
-          Everything that happened — from data ingestion to model approval to live serving —
-          is recorded, versioned, and auditable on one platform. A regulatory auditor can
-          reconstruct the exact state of any model, its training data, and the human decisions
-          that approved it. Unity Catalog provides lineage automatically; the audit_log adds
-          the human governance layer on top.
+      <div className="mb-4">
+        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <Shield className="w-6 h-6 text-amber-600" /> Model Governance
+        </h2>
+        <p className="text-gray-500 mt-1">
+          Defend production models to regulators and auditors. Browse by model, by date, or trace the decision on a single policy.
         </p>
       </div>
 
-      {/* Event summary cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <StatCard icon={Activity} label="Total Audit Events"
-          value={data.events_by_type?.reduce((s: number, e: any) => s + Number(e.event_count || 0), 0) || 0} color="blue" />
-        <StatCard icon={Shield} label="Event Types"
-          value={data.events_by_type?.length || 0} color="purple" />
-        <StatCard icon={Database} label="Datasets Tracked"
-          value={data.data_quality?.length || 0} color="green" />
-        <StatCard icon={Bot} label="AI Agent Calls"
-          value={data.agent_usage?.length || 0} color="amber" />
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            'Unity Catalog lineage',
+            'MLflow model registry',
+            'Governance pack generation',
+            'Fairness & risk register',
+            'Agent-assisted review · Claude Sonnet 4.6 (Foundation Model API)',
+            'Immutable audit trail',
+          ].map(f => (
+            <span key={f} className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-100 text-amber-800">{f}</span>
+          ))}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        {/* Audit Events by Type */}
-        <Section title="Audit Events by Type" icon={Activity}>
-          <p className="text-xs text-gray-500 mb-3">
-            <strong>Why this matters:</strong> Regulators require evidence that every decision
-            in the pricing chain was made by a named individual with a timestamp.
-          </p>
-          {data.events_by_type?.length > 0 ? (
-            <table className="min-w-full text-sm">
-              <thead><tr className="bg-gray-50 border-b">
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Event</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Entity</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Count</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Users</th>
-              </tr></thead>
-              <tbody>
-                {data.events_by_type.map((e: any, i: number) => (
-                  <tr key={i} className="border-b hover:bg-gray-50">
-                    <td className="px-3 py-2 font-mono text-xs">{e.event_type}</td>
-                    <td className="px-3 py-2 text-gray-600 text-xs">{e.entity_type}</td>
-                    <td className="px-3 py-2 text-right font-medium">{e.event_count}</td>
-                    <td className="px-3 py-2 text-right text-gray-500">{e.unique_users}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p className="text-gray-400 text-sm">No events yet</p>}
-        </Section>
+      <div className="bg-white rounded-lg border border-gray-200 p-1 mb-5 inline-flex gap-1">
+        <SegButton active={mode === 'by-model'}  onClick={() => { setMode('by-model');  setPack(null); setPolicyContext(null); }}
+                   icon={<Layers className="w-3.5 h-3.5" />} label="By model" />
+        <SegButton active={mode === 'by-date'}   onClick={() => { setMode('by-date');   setPack(null); setPolicyContext(null); }}
+                   icon={<Calendar className="w-3.5 h-3.5" />} label="By date" />
+        <SegButton active={mode === 'by-policy'} onClick={() => { setMode('by-policy'); setPack(null); setPolicyContext(null); }}
+                   icon={<Search className="w-3.5 h-3.5" />} label="By policy" />
+      </div>
 
-        {/* Data Quality */}
-        <Section title="Data Quality — Pipeline Pass Rates" icon={CheckCircle2}>
-          <p className="text-xs text-gray-500 mb-3">
-            <strong>Why this matters:</strong> DLT expectations enforce data contracts at ingestion.
-            Rows that fail are dropped — this table shows how many and for which datasets.
-          </p>
-          {data.data_quality?.map((dq: any, i: number) => (
-            <div key={i} className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium">{dq.dataset}</span>
-                <span className={`text-xs font-medium ${Number(dq.pass_rate) >= 95 ? 'text-green-600' : 'text-amber-600'}`}>
-                  {dq.pass_rate}%
-                </span>
-              </div>
-              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full ${Number(dq.pass_rate) >= 95 ? 'bg-green-500' : 'bg-amber-400'}`}
-                     style={{ width: `${dq.pass_rate}%` }} />
-              </div>
-              <div className="text-[10px] text-gray-400 mt-0.5">
-                {dq.raw_rows} raw → {dq.silver_rows} silver ({dq.dropped} dropped)
-              </div>
-            </div>
-          ))}
-        </Section>
+      <div className="grid gap-5">
+        {!selectedPack && mode === 'by-model' &&
+          <ByModel familyPacks={familyPacks} onPick={setPack} />}
+        {!selectedPack && mode === 'by-date' &&
+          <ByDate onPick={setPack} />}
+        {!selectedPack && mode === 'by-policy' &&
+          <ByPolicy onPick={(p, ctx) => { setPack(p); setPolicyContext(ctx); }} />}
 
-        {/* Delta Lineage */}
-        <Section title="Feature Table Version History" icon={Clock}>
-          <p className="text-xs text-gray-500 mb-3">
-            <strong>Why this matters:</strong> Delta Time Travel lets you reconstruct the exact
-            feature table state used for any historical model or pricing decision.
-          </p>
-          {data.delta_lineage?.length > 0 ? (
-            <table className="min-w-full text-sm">
-              <thead><tr className="bg-gray-50 border-b">
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Version</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Operation</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Timestamp</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">User</th>
-              </tr></thead>
-              <tbody>
-                {data.delta_lineage.map((h: any, i: number) => (
-                  <tr key={i} className="border-b hover:bg-gray-50">
-                    <td className="px-3 py-2 font-mono font-bold text-xs">v{h.version}</td>
-                    <td className="px-3 py-2 text-xs">{h.operation}</td>
-                    <td className="px-3 py-2 text-xs text-gray-500">{h.timestamp}</td>
-                    <td className="px-3 py-2 text-xs text-gray-500">{h.userName?.split('@')[0]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : <p className="text-gray-400 text-sm">No history</p>}
-        </Section>
+        {selectedPack && (
+          <PackViewer
+            pack={selectedPack}
+            policyContext={policyContext}
+            onBack={() => { setPack(null); setPolicyContext(null); }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
 
-        {/* AI Agent Transparency */}
-        <Section title="AI Agent Interactions" icon={Bot}>
-          <p className="text-xs text-gray-500 mb-3">
-            <strong>Why this matters:</strong> Every LLM call is logged with the full prompt
-            and response. Unlike black-box SaaS, a regulator can inspect exactly what the
-            AI recommended and verify the human approved or rejected it.
-          </p>
-          {data.agent_usage?.length > 0 ? (
-            data.agent_usage.map((e: any, i: number) => {
-              let details: any = {};
-              try { details = typeof e.details === 'string' ? JSON.parse(e.details) : e.details; } catch {}
-              return (
-                <div key={i} className="border rounded-lg p-3 mb-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-medium">{e.user_id?.split('@')[0]}</span>
-                    <span className="text-gray-400">{e.timestamp}</span>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Endpoint: {details.model_endpoint || '—'} |
-                    Recommendations: {details.recommendations_count || 0} |
-                    Success: {details.llm_success ? '✓' : '✗'}
+function SegButton({ active, onClick, icon, label }:
+  { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button onClick={onClick}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition ${
+              active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+            }`}>
+      {icon} {label}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// By model
+// ---------------------------------------------------------------------------
+
+function ByModel({ familyPacks, onPick }: { familyPacks: FamilyPacks[]; onPick: (p: Pack) => void }) {
+  const [expanded, setExpanded] = useState<string | null>(familyPacks[0]?.key || null);
+  useEffect(() => {
+    if (!expanded && familyPacks.length > 0) setExpanded(familyPacks[0].key);
+  }, [familyPacks.length]);
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-800">Production champions</h3>
+        <span className="text-xs text-gray-500">{familyPacks.length} model families</span>
+      </div>
+      <div>
+        {familyPacks.map(fam => {
+          const isOpen = expanded === fam.key;
+          const champion = fam.packs[0];
+          return (
+            <div key={fam.key} className="border-b last:border-b-0">
+              <button onClick={() => setExpanded(isOpen ? null : fam.key)}
+                      className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                <div className="flex items-center gap-3">
+                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
+                  <div className="text-left">
+                    <div className="font-medium text-gray-900">{fam.label}</div>
+                    <div className="text-xs text-gray-500 font-mono">{fam.key}</div>
                   </div>
                 </div>
-              );
-            })
-          ) : (
-            <p className="text-gray-400 text-sm">No agent interactions — AI assistant is optional</p>
-          )}
-        </Section>
-      </div>
-
-      {/* DQ Monitoring Agent */}
-      <div className="mt-6 bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Bot className="w-4 h-4 text-orange-600" />
-            <h3 className="font-semibold text-gray-800">AI Data Quality Monitor</h3>
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600 border border-orange-200">OPTIONAL</span>
-          </div>
-          <button onClick={runDqAgent} disabled={dqLoading}
-            className="px-3 py-1 bg-orange-600 text-white rounded text-xs font-medium hover:bg-orange-700 disabled:opacity-50 flex items-center gap-1">
-            {dqLoading ? <><Loader2 className="w-3 h-3 animate-spin" /> Scanning...</> : <><Bot className="w-3 h-3" /> Run DQ Scan</>}
-          </button>
-        </div>
-        <div className="p-4">
-          <p className="text-xs text-gray-500 mb-3">
-            <strong>Why this matters:</strong> Rule-based DQ catches known issues. This agent uses AI to detect
-            unexpected patterns — distribution shifts, cross-column inconsistencies, and anomalies that rules miss.
-          </p>
-          {dqResult?.success && dqResult.findings && (
-            <>
-              <div className="mb-3 text-sm text-gray-700">{dqResult.findings.overall_assessment}</div>
-              <div className="space-y-2">
-                {dqResult.findings.findings?.map((f: any, i: number) => (
-                  <div key={i} className={`rounded-lg p-3 border text-sm ${
-                    f.severity === 'CRITICAL' ? 'bg-red-50 border-red-200' :
-                    f.severity === 'WARNING' ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'
-                  }`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                        f.severity === 'CRITICAL' ? 'bg-red-100 text-red-700' :
-                        f.severity === 'WARNING' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                      }`}>{f.severity}</span>
-                      <span className="font-medium text-gray-800">{f.dataset} / {f.column}</span>
-                    </div>
-                    <p className="text-gray-600 text-xs">{f.finding}</p>
-                    <p className="text-gray-500 text-xs mt-1">Action: {f.suggested_action}</p>
-                  </div>
-                ))}
-              </div>
-              <button onClick={() => setDqExpanded(!dqExpanded)} className="mt-2 text-xs text-gray-500 flex items-center gap-1">
-                {dqExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                {dqExpanded ? 'Hide' : 'Show'} full LLM response
+                <div className="text-xs text-gray-600 text-right">
+                  {champion ? (
+                    <>
+                      <div>Current champion: <span className="font-mono text-gray-900">v{champion.model_version}</span></div>
+                      <div className="text-[11px] text-gray-500">Pack {formatDate(champion.generated_at)} · {fam.packs.length} total</div>
+                    </>
+                  ) : <span className="italic text-gray-400">no packs yet</span>}
+                </div>
               </button>
-              {dqExpanded && (
-                <pre className="mt-2 text-[10px] bg-gray-50 border rounded p-2 max-h-40 overflow-auto whitespace-pre-wrap">
-                  {dqResult.transparency?.raw_response}
-                </pre>
-              )}
-            </>
-          )}
-          {dqResult && !dqResult.success && (
-            <p className="text-red-500 text-sm">Agent error: {dqResult.error || 'Unknown'}</p>
-          )}
-        </div>
+              {isOpen && <PackTimeline packs={fam.packs} onPick={onPick} />}
+            </div>
+          );
+        })}
       </div>
+    </section>
+  );
+}
 
-      {/* Recent Activity Timeline */}
-      <div className="mt-6">
-        <Section title="Recent Activity Timeline" icon={Activity}>
-          <p className="text-xs text-gray-500 mb-3">
-            Complete chronological log of all governance events across data, models, and serving.
-          </p>
-          <div className="space-y-2">
-            {data.recent_activity?.map((e: any, i: number) => (
-              <div key={i} className="flex items-center gap-3 py-1.5 border-b border-gray-100 last:border-0">
-                <div className={`w-2 h-2 rounded-full shrink-0 ${
-                  e.event_type?.includes('approved') ? 'bg-green-500' :
-                  e.event_type?.includes('rejected') ? 'bg-red-500' :
-                  e.event_type?.includes('agent') ? 'bg-purple-500' :
-                  'bg-blue-500'
-                }`} />
-                <span className="text-xs text-gray-400 w-36 shrink-0">{e.timestamp?.slice(0, 19)}</span>
-                <span className="text-xs font-mono text-gray-700 w-36 shrink-0">{e.event_type}</span>
-                <span className="text-xs text-gray-500">{e.entity_type}/{e.entity_id}</span>
-                <span className="text-xs text-gray-400 ml-auto">{e.user_id?.split('@')[0]} ({e.source})</span>
+function PackTimeline({ packs, onPick }: { packs: Pack[]; onPick: (p: Pack) => void }) {
+  if (packs.length === 0) {
+    return <div className="px-4 pb-4 text-xs text-gray-500 italic">No packs generated for this family yet.</div>;
+  }
+  return (
+    <div className="px-4 pb-4">
+      <div className="relative pl-6">
+        <div className="absolute left-2 top-1 bottom-1 w-px bg-gray-200" />
+        {packs.map((p, i) => {
+          const isChampion = i === 0;
+          return (
+            <button key={p.pack_id} onClick={() => onPick(p)}
+                    className="relative block w-full text-left py-2 px-3 hover:bg-gray-50 rounded group">
+              <div className={`absolute -left-5 top-3 w-3 h-3 rounded-full border-2 ${
+                isChampion ? 'bg-emerald-500 border-emerald-600' : 'bg-white border-gray-400'
+              }`} />
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm text-gray-900">v{p.model_version}</span>
+                    {isChampion && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">current</span>
+                    )}
+                    {p.simulated && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">simulated</span>
+                    )}
+                    <span className="text-xs text-gray-600">{p.story}</span>
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">
+                    Pack {formatDate(p.generated_at)} · generated by {(p.generated_by || '').split('@')[0]}
+                    {p.primary_metric && p.primary_value != null && (
+                      <span> · <span className="font-mono">{p.primary_metric}={Number(p.primary_value).toFixed(4)}</span></span>
+                    )}
+                  </div>
+                </div>
+                <span className="text-xs text-blue-600 group-hover:underline">Open pack →</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// By date
+// ---------------------------------------------------------------------------
+
+function ByDate({ onPick }: { onPick: (p: Pack) => void }) {
+  const today = new Date().toISOString().substring(0, 10);
+  const [date, setDate] = useState(today);
+  const [packs, setPacks] = useState<Pack[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    api.getPacksOnDate(date).then(d => setPacks(d.packs || []))
+      .catch(() => setPacks([])).finally(() => setLoading(false));
+  }, [date]);
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-gray-800">Models in production on</h3>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)}
+               className="border border-gray-300 rounded px-2 py-1 text-sm" />
+      </div>
+      {loading ? (
+        <div className="py-8 text-center text-sm text-gray-500">
+          <Loader2 className="w-4 h-4 inline animate-spin mr-1" /> Looking up packs…
+        </div>
+      ) : packs.length === 0 ? (
+        <div className="py-8 text-center text-sm text-gray-500 italic">
+          No packs had been generated on or before this date.
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-500 border-b bg-gray-50">
+              <th className="text-left px-3 py-2 font-medium">Family</th>
+              <th className="text-left px-3 py-2 font-medium">Version</th>
+              <th className="text-left px-3 py-2 font-medium">Story</th>
+              <th className="text-right px-3 py-2 font-medium">Primary metric</th>
+              <th className="text-left px-3 py-2 font-medium">Pack generated</th>
+              <th className="text-right px-3 py-2 font-medium">&nbsp;</th>
+            </tr>
+          </thead>
+          <tbody>
+            {packs.map(p => (
+              <tr key={p.pack_id} className="border-b last:border-0 hover:bg-gray-50">
+                <td className="px-3 py-2 font-medium text-gray-900">{p.model_family}</td>
+                <td className="px-3 py-2 font-mono text-xs">v{p.model_version}</td>
+                <td className="px-3 py-2 text-xs text-gray-600">{p.story || '—'}</td>
+                <td className="px-3 py-2 text-right text-xs font-mono">
+                  {p.primary_metric}={p.primary_value != null ? Number(p.primary_value).toFixed(4) : '—'}
+                </td>
+                <td className="px-3 py-2 text-xs text-gray-600">{formatDate(p.generated_at)}</td>
+                <td className="px-3 py-2 text-right">
+                  <button onClick={() => onPick(p)}
+                          className="text-blue-600 hover:text-blue-800 text-xs font-medium">
+                    Open pack →
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// By policy — flagship flow
+// ---------------------------------------------------------------------------
+
+function ByPolicy({ onPick }: { onPick: (p: Pack, ctx: { policy_id: string }) => void }) {
+  const [policyId, setPolicyId] = useState('');
+  const [scoring, setScoring]   = useState<any>(null);
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState<string | null>(null);
+
+  const run = async (id: string) => {
+    if (!id.trim()) return;
+    setLoading(true); setErr(null); setScoring(null);
+    try {
+      const d = await api.getPolicyScoring(id.trim().toUpperCase());
+      setScoring(d);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submit = (e?: FormEvent) => { e?.preventDefault(); run(policyId); };
+
+  const openPackFor = async (fam: any) => {
+    if (!fam.pack_id) return;
+    const pack = await api.getPackDetail(fam.pack_id);
+    onPick(pack, { policy_id: scoring.policy_id });
+  };
+
+  return (
+    <>
+      <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="px-4 py-2.5 bg-gray-50 border-b">
+          <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+            <UserCircle2 className="w-4 h-4 text-gray-500" /> Why was this customer priced £X?
+          </h3>
+        </div>
+        <form onSubmit={submit} className="p-4 flex items-center gap-2">
+          <input value={policyId}
+                 onChange={e => setPolicyId(e.target.value.toUpperCase())}
+                 placeholder="Policy ID (e.g. POL-100042)"
+                 className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm font-mono" />
+          <button type="submit" disabled={loading || !policyId.trim()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            Look up
+          </button>
+          <button type="button"
+                  onClick={() => { setPolicyId('POL-100042'); run('POL-100042'); }}
+                  className="text-xs text-gray-500 hover:text-gray-700 ml-2">
+            try POL-100042
+          </button>
+        </form>
+        {err && <div className="px-4 pb-4 text-xs text-red-700"><AlertTriangle className="w-3 h-3 inline mr-1" /> {err}</div>}
+      </section>
+
+      {scoring && <ScoringStory scoring={scoring} openPackFor={openPackFor} />}
+    </>
+  );
+}
+
+function ScoringStory({ scoring, openPackFor }: { scoring: any; openPackFor: (fam: any) => void }) {
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-800">
+          Scoring story — {scoring.policy_id}
+        </h3>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">
+          Simulated — no real inference log
+        </span>
+      </div>
+      <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div>
+          <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Policy features at quote time</h4>
+          <div className="bg-gray-50 border border-gray-200 rounded p-3 space-y-0.5 text-xs">
+            {Object.entries(scoring.policy).map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-2">
+                <span className="text-gray-600">{k}</span>
+                <span className="font-mono text-gray-900 text-right truncate">{String(v ?? '—')}</span>
               </div>
             ))}
           </div>
-        </Section>
+        </div>
+
+        <div>
+          <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Each model's prediction</h4>
+          <div className="space-y-2">
+            {scoring.models.map((m: any) => (
+              <button key={m.family}
+                      onClick={() => openPackFor(m)}
+                      disabled={!m.pack_id}
+                      className="w-full bg-white border border-gray-200 rounded p-2.5 hover:border-blue-300 hover:shadow-sm disabled:opacity-50 text-left group">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-gray-900">{m.label}</div>
+                  <div className="text-xs font-mono text-gray-900">
+                    {m.unit === 'GBP' ? `£${Number(m.prediction).toLocaleString()}` : Number(m.prediction).toFixed(3)}
+                  </div>
+                </div>
+                <div className="text-[10px] text-gray-500 mt-0.5 flex items-center justify-between">
+                  <span>v{m.model_version || '—'} · {m.unit}</span>
+                  {m.pack_id && <span className="text-blue-600 group-hover:underline">open pack →</span>}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Price build-up</h4>
+          <div className="bg-gray-50 border border-gray-200 rounded p-3 text-xs space-y-1">
+            {scoring.price_build_up.map((step: any, i: number) => (
+              <div key={i}
+                   className={`flex justify-between ${step.emphasis ? 'border-t border-gray-300 pt-2 mt-1 font-semibold text-gray-900' : ''}`}>
+                <span className="text-gray-700">{step.label}</span>
+                <span className="font-mono">£{Number(step.amount).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-gray-500 italic mt-2">
+            {scoring.note}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pack Viewer
+// ---------------------------------------------------------------------------
+
+function PackViewer({ pack, policyContext, onBack }:
+  { pack: Pack; policyContext: { policy_id: string } | null; onBack: () => void }) {
+  const [showPdf, setShowPdf]   = useState(true);
+  const [showChat, setShowChat] = useState(true);
+  const pdfUrl = api.packPdfUrl(pack.pack_id);
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800">
+            Pack · {pack.model_family} v{pack.model_version}
+          </h3>
+          <div className="text-[11px] text-gray-500 font-mono">{pack.pack_id}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowPdf(!showPdf)}
+                  className={`text-xs px-2 py-1 rounded inline-flex items-center gap-1 border ${
+                    showPdf ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200'
+                  }`}>
+            {showPdf ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />} PDF
+          </button>
+          <button onClick={() => setShowChat(!showChat)}
+                  className={`text-xs px-2 py-1 rounded inline-flex items-center gap-1 border ${
+                    showChat ? 'bg-blue-50 text-blue-700 border-blue-200'
+                             : 'bg-gray-50 text-gray-600 border-gray-200'
+                  }`}>
+            <Bot className="w-3 h-3" /> Agent
+          </button>
+          <a href={pdfUrl} target="_blank" rel="noopener noreferrer"
+             className="text-xs text-gray-600 hover:text-gray-900 inline-flex items-center gap-1">
+            <ExternalLink className="w-3 h-3" /> Download
+          </a>
+          <button onClick={onBack}
+                  className="text-xs text-gray-500 hover:text-gray-800">← Back</button>
+        </div>
+      </div>
+
+      <div className={`grid gap-4 p-4 ${showPdf && showChat ? 'lg:grid-cols-2' : 'grid-cols-1'}`}>
+        {showPdf  && <PdfPane pack={pack} pdfUrl={pdfUrl} />}
+        {showChat && <ChatPane pack={pack} policyContext={policyContext} />}
+      </div>
+    </section>
+  );
+}
+
+function PdfPane({ pack, pdfUrl }: { pack: Pack; pdfUrl: string }) {
+  const sections = [
+    { id: 1,  label: 'Executive summary' },
+    { id: 2,  label: 'Business context & intended use' },
+    { id: 3,  label: 'Data lineage & sources' },
+    { id: 4,  label: 'Model specification' },
+    { id: 5,  label: 'Performance evidence' },
+    { id: 6,  label: 'Feature behaviour' },
+    { id: 7,  label: 'Stability & version history' },
+    { id: 8,  label: 'Fairness & ethical considerations' },
+    { id: 9,  label: 'Risks & controls' },
+    { id: 10, label: 'Regulatory coverage' },
+    { id: 11, label: 'Audit trail' },
+    { id: 12, label: 'Committee sign-off' },
+  ];
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
+        <BookOpen className="w-3.5 h-3.5" />
+        Section bookmarks
+      </div>
+      <div className="flex flex-wrap gap-1 mb-2">
+        {sections.map(s => (
+          <a key={s.id}
+             href={`${pdfUrl}#page=${s.id + 1}`} target="_blank" rel="noopener noreferrer"
+             className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 hover:bg-blue-100 hover:text-blue-700"
+             title={s.label}>
+            {s.id}. {s.label}
+          </a>
+        ))}
+      </div>
+      <div className="border border-gray-200 rounded overflow-hidden" style={{ height: '70vh' }}>
+        <iframe src={pdfUrl} title={`Governance pack ${pack.pack_id}`}
+                className="w-full h-full" />
+      </div>
+      <div className="text-[11px] text-gray-500 mt-2">
+        Generated {formatDate(pack.generated_at)} by {(pack.generated_by || '').split('@')[0]} · {formatBytes(pack.size_bytes)}
       </div>
     </div>
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: number; color: string }) {
-  const colorMap: Record<string, string> = {
-    blue: 'bg-blue-50 border-blue-200 text-blue-700',
-    purple: 'bg-purple-50 border-purple-200 text-purple-700',
-    green: 'bg-green-50 border-green-200 text-green-700',
-    amber: 'bg-amber-50 border-amber-200 text-amber-700',
+type ToolStep = { hop: number; tool: string; arguments: any; result_summary: string };
+
+type ChatTurn = {
+  question: string;
+  answer?: string;
+  loading?: boolean;
+  model?: string;
+  endpoint?: string;
+  source?: string;
+  cited_sections?: string[];
+  tool_trace?: ToolStep[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  error?: string;
+  fallback_reason?: string;
+};
+
+const SUGGESTED_QUESTIONS_GENERAL = [
+  "Why was this model promoted over the previous version?",
+  "Is this model fair across protected characteristics?",
+  "What are the top 5 drivers of predictions?",
+  "Has this model drifted since the last version?",
+  "Draft a regulator response: customer complains the pricing is unfair",
+];
+const SUGGESTED_QUESTIONS_POLICY = [
+  "Draft a formal response to the customer explaining this price",
+  "Are there any fairness concerns specific to this policy?",
+  "Which single factor contributed most to this price?",
+];
+
+function ChatPane({ pack, policyContext }:
+  { pack: Pack; policyContext: { policy_id: string } | null }) {
+  const [input, setInput]   = useState('');
+  const [turns, setTurns]   = useState<ChatTurn[]>([]);
+  const [busy, setBusy]     = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
+
+  const suggestions = useMemo(() => [
+    ...(policyContext ? SUGGESTED_QUESTIONS_POLICY : []),
+    ...SUGGESTED_QUESTIONS_GENERAL,
+  ], [policyContext]);
+
+  const ask = async (q: string) => {
+    const question = q.trim();
+    if (!question || busy) return;
+    setBusy(true);
+    setInput('');
+    setTurns(t => [...t, { question, loading: true }]);
+    try {
+      const r = await api.chatWithPack(pack.pack_id, question, policyContext?.policy_id);
+      setTurns(t => t.map((x, i) =>
+        i === t.length - 1
+          ? { ...x, loading: false, answer: r.answer, model: r.model, endpoint: r.endpoint,
+              source: r.source, fallback_reason: r.fallback_reason,
+              cited_sections: r.cited_sections, tool_trace: r.tool_trace,
+              usage: r.usage, error: r.error }
+          : x));
+    } catch (e: any) {
+      setTurns(t => t.map((x, i) =>
+        i === t.length - 1 ? { ...x, loading: false, error: e.message } : x));
+    } finally {
+      setBusy(false);
+    }
   };
+
   return (
-    <div className={`rounded-lg border p-4 ${colorMap[color]}`}>
-      <div className="flex items-center gap-2 mb-1">
-        <Icon className="w-4 h-4" />
-        <span className="text-xs font-medium uppercase tracking-wide opacity-70">{label}</span>
+    <div>
+      <div className="flex items-center gap-2 text-xs text-gray-600 mb-2 flex-wrap">
+        <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+        <span>Ask a question — grounded in this pack's content</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 font-medium">
+          Agent Framework · pricing_governance_agent
+        </span>
       </div>
-      <div className="text-2xl font-bold">{value}</div>
+
+      <div className="border border-gray-200 rounded flex flex-col" style={{ height: '70vh' }}>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50">
+          {turns.length === 0 && (
+            <div className="py-4">
+              <div className="text-xs text-gray-500 mb-3 text-center">
+                Pre-populated questions{policyContext && <> · <code className="bg-white px-1 rounded">{policyContext.policy_id}</code></>}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {suggestions.map(s => (
+                  <button key={s} onClick={() => ask(s)}
+                          className="text-xs text-left px-3 py-1.5 rounded bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-gray-800">
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {turns.map((t, i) => (
+            <div key={i} className="space-y-1">
+              <div className="flex gap-2">
+                <UserCircle2 className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+                <div className="text-sm text-gray-800 flex-1">{t.question}</div>
+              </div>
+              <div className="flex gap-2 pl-1">
+                <Bot className="w-4 h-4 text-violet-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  {t.loading ? (
+                    <div className="text-xs text-gray-500 italic inline-flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Grounding in pack…
+                    </div>
+                  ) : t.error ? (
+                    <div className="text-xs text-red-700">
+                      <AlertTriangle className="w-3 h-3 inline mr-1" /> {t.error}
+                    </div>
+                  ) : (
+                    <>
+                      {t.tool_trace && t.tool_trace.length > 0 && (
+                        <div className="mb-2 space-y-0.5">
+                          {t.tool_trace.map((s, idx) => (
+                            <div key={idx}
+                                 className="text-[11px] text-violet-900 bg-violet-50 border border-violet-200 rounded px-2 py-1 inline-flex items-center gap-1.5 mr-1">
+                              <Bot className="w-3 h-3" />
+                              <span className="font-mono">{s.tool}</span>
+                              <span className="text-violet-700 font-mono">({summariseArgs(s.arguments)})</span>
+                              <span className="text-violet-600">→ {s.result_summary}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="text-sm text-gray-900 whitespace-pre-wrap">{t.answer}</div>
+                      <div className="mt-1 flex items-center gap-3 flex-wrap text-[10px] text-gray-500">
+                        {t.endpoint && <span>endpoint: {t.endpoint}</span>}
+                        {t.source === 'fm_api_fallback' && (
+                          <span className="text-amber-700" title={t.fallback_reason || ''}>
+                            fallback: FM API (agent unavailable)
+                          </span>
+                        )}
+                        {t.cited_sections && t.cited_sections.length > 0 && (
+                          <span>cited: {t.cited_sections.map(s => `§${s}`).join(', ')}</span>
+                        )}
+                        {t.usage?.total_tokens != null && <span>tokens: {t.usage.total_tokens}</span>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <form onSubmit={(e) => { e.preventDefault(); ask(input); }}
+              className="border-t bg-white p-2 flex gap-2">
+          <input value={input} onChange={e => setInput(e.target.value)}
+                 placeholder="Ask about this pack…"
+                 disabled={busy}
+                 className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm" />
+          <button type="submit" disabled={busy || !input.trim()}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Ask
+          </button>
+        </form>
+      </div>
+
+      <button onClick={() => setShowTrace(!showTrace)}
+              className="text-[11px] text-gray-500 hover:text-gray-700 mt-2 inline-flex items-center gap-1">
+        <MessageSquare className="w-3 h-3" /> {showTrace ? 'Hide' : 'Show'} full LLM interaction
+      </button>
+      {showTrace && turns.length > 0 && (
+        <div className="bg-gray-900 text-gray-100 text-[11px] font-mono rounded p-3 mt-2 whitespace-pre-wrap max-h-96 overflow-auto">
+          {turns.map((t, i) => (
+            <div key={i} className="mb-3">
+              <div className="text-violet-300">user: {t.question}</div>
+              {(t.tool_trace || []).map((s, idx) => (
+                <div key={idx} className="text-amber-300 mt-1">
+                  tool[{s.hop}]: {s.tool}({summariseArgs(s.arguments)}) → {s.result_summary}
+                </div>
+              ))}
+              <div className="text-emerald-300 mt-1">assistant: {t.answer || t.error || '(loading…)'}</div>
+              {t.usage && <div className="text-gray-400 mt-1 text-[10px]">tokens: {JSON.stringify(t.usage)}</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Section({ title, icon: Icon, children }: { title: string; icon: any; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="px-4 py-3 bg-gray-50 border-b flex items-center gap-2">
-        <Icon className="w-4 h-4 text-gray-600" />
-        <h3 className="font-semibold text-gray-800">{title}</h3>
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatDate(iso?: string | null) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).substring(0, 10);
+  return d.toISOString().substring(0, 10);
+}
+
+function formatBytes(n?: number) {
+  if (!n) return '—';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function summariseArgs(args: any): string {
+  if (!args || typeof args !== 'object') return '';
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(args)) {
+    if (v == null || v === '') continue;
+    let s = typeof v === 'string' ? v : JSON.stringify(v);
+    if (s.length > 40) s = s.slice(0, 37) + '…';
+    parts.push(`${k}=${s}`);
+  }
+  return parts.join(' ');
 }

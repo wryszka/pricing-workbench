@@ -1,27 +1,29 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Database, FlaskConical, Shield, Code, Rocket, Activity, Home as HomeIcon, Table2, Receipt } from 'lucide-react';
+import { Database, FlaskConical, Shield, Code, Rocket, Home as HomeIcon, Table2, Package, Sparkles } from 'lucide-react';
 import Home from './pages/Home';
 import DatasetList from './pages/DatasetList';
 import DatasetDetail from './pages/DatasetDetail';
 import FeatureStore from './pages/FeatureStore';
 import ModelDevelopment from './pages/ModelDevelopment';
 import ModelFactory from './pages/ModelFactory';
-import ModelFactoryRun from './pages/ModelFactoryRun';
 import ModelDeployment from './pages/ModelDeployment';
-import Monitoring from './pages/Monitoring';
 import Governance from './pages/Governance';
 import QuoteReview from './pages/QuoteReview';
+import Addons from './pages/Addons';
+import NewDataImpact from './pages/NewDataImpact';
+import RatingEngineIntegration from './pages/RatingEngineIntegration';
+import RegulatoryAI from './pages/RegulatoryAI';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Home', icon: HomeIcon, match: (p: string) => p === '/' },
-  { to: '/datasets', label: 'Ingestion', icon: Database, match: (p: string) => p.startsWith('/dataset') },
-  { to: '/pricing-table', label: 'Modelling Mart', icon: Table2, match: (p: string) => p.startsWith('/pricing-table') },
-  { to: '/development', label: 'Model Development', icon: Code, match: (p: string) => p.startsWith('/development') },
-  { to: '/models', label: 'Model Factory', icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
-  { to: '/deployment', label: 'Model Deployment', icon: Rocket, match: (p: string) => p.startsWith('/deployment') },
-  { to: '/quote-review', label: 'Quote Review', icon: Receipt, match: (p: string) => p.startsWith('/quote-review') },
-  { to: '/monitoring', label: 'Monitoring', icon: Activity, match: (p: string) => p.startsWith('/monitoring') },
-  { to: '/governance', label: 'Governance', icon: Shield, match: (p: string) => p.startsWith('/governance') },
+  { to: '/',              label: 'Home',              icon: HomeIcon,     match: (p: string) => p === '/' },
+  { to: '/datasets',      label: 'Ingestion',         icon: Database,     match: (p: string) => p.startsWith('/dataset') },
+  { to: '/pricing-table', label: 'Modelling Mart',    icon: Table2,       match: (p: string) => p.startsWith('/pricing-table') },
+  { to: '/development',   label: 'Model Development', icon: Code,         match: (p: string) => p.startsWith('/development') },
+  { to: '/deployment',    label: 'Model Deployment',  icon: Rocket,       match: (p: string) => p.startsWith('/deployment') },
+  { to: '/governance',    label: 'Model Governance',  icon: Shield,       match: (p: string) => p.startsWith('/governance') },
+  { to: '/regulatory-ai', label: 'Regulatory AI',     icon: Sparkles,     match: (p: string) => p.startsWith('/regulatory-ai') },
+  { to: '/models',        label: 'Model Factory',     icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
+  { to: '/add-ons',       label: 'Add-ons',           icon: Package,      match: (p: string) => p.startsWith('/add-ons') || p.startsWith('/quote-review') },
 ];
 
 function Sidebar() {
@@ -75,11 +77,15 @@ export default function App() {
             <Route path="/pricing-table" element={<FeatureStore />} />
             <Route path="/development" element={<ModelDevelopment />} />
             <Route path="/models" element={<ModelFactory />} />
-            <Route path="/models/:runId" element={<ModelFactoryRun />} />
             <Route path="/deployment" element={<ModelDeployment />} />
-            <Route path="/quote-review" element={<QuoteReview />} />
-            <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/governance" element={<Governance />} />
+            <Route path="/regulatory-ai" element={<RegulatoryAI />} />
+            <Route path="/add-ons" element={<Addons />} />
+            <Route path="/add-ons/quote-review" element={<QuoteReview />} />
+            <Route path="/add-ons/new-data-impact" element={<NewDataImpact />} />
+            <Route path="/add-ons/rating-engine" element={<RatingEngineIntegration />} />
+            {/* Legacy redirect */}
+            <Route path="/quote-review" element={<QuoteReview />} />
           </Routes>
         </main>
       </div>

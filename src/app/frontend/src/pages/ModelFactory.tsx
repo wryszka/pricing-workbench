@@ -1,656 +1,900 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { FlaskConical, ChevronRight, CheckCircle2, Clock, AlertTriangle, Bot, Loader2, ChevronDown, ChevronUp, Shield, Sparkles, Send, Check, FileText } from 'lucide-react';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
+import {
+  FlaskConical, Loader2, Check, ArrowRight, Play, Sparkles, ClipboardList,
+  Trophy, Target, Layers, PackageCheck, AlertTriangle, ChevronRight, Send, Bot,
+  UserCircle2, MessageSquare, TrendingDown, TrendingUp, Info,
+} from 'lucide-react';
 import { api } from '../lib/api';
 
+type Variant = {
+  variant_id: string;
+  name: string;
+  category: 'feature_subset' | 'interactions' | 'banding';
+  features?: string[];
+  interactions?: [string, string][];
+  banding?: string;
+  glm?: { family: string; link: string };
+  notes?: string;
+  n_features?: number;
+  metrics?: Record<string, number>;
+  config?: any;
+  cv?: { cv_gini_mean: number; cv_gini_std: number; stability: string; cv_folds: number };
+  sign_checks?: Record<string, string>;
+};
+
+type Step = 'plan' | 'train' | 'review' | 'pack';
+
+const FAMILIES = [
+  { key: 'freq_glm',   label: 'Frequency (GLM)',  supported: true  },
+  { key: 'sev_glm',    label: 'Severity (GLM)',   supported: false },
+  { key: 'demand_gbm', label: 'Demand (GBM)',     supported: false },
+  { key: 'fraud_gbm',  label: 'Fraud (GBM)',      supported: false },
+];
+
+type Mode = 'demo' | 'real';
+
+const API_BY_MODE = {
+  demo: {
+    propose:      (family: string) => api.factoryPropose(family),
+    approve:      (family: string, plan: any[], narrative: string) => api.factoryApprove(family, plan, narrative),
+    getRun:       (runId: string) => api.factoryGetRun(runId),
+    leaderboard:  (runId: string) => api.factoryLeaderboard(runId),
+    shortlist:    (runId: string) => api.factoryShortlist(runId),
+    portfolio:    (runId: string) => api.factoryPortfolio(runId),
+    chat:         (runId: string, q: string) => api.factoryChat(runId, q),
+    promoteFor:   (runId: string, variantId: string) => api.factoryPromoteVariant(runId, variantId),
+    pollIntervalMs: 1200,
+    pollTimesOutAfter: undefined as number | undefined,
+  },
+  real: {
+    propose:      (family: string) => api.factoryRealPropose(family),
+    approve:      (family: string, plan: any[], narrative: string) => api.factoryRealApprove(family, plan, narrative),
+    getRun:       (runId: string) => api.factoryRealGetRun(runId),
+    leaderboard:  (runId: string) => api.factoryRealLeaderboard(runId),
+    shortlist:    (runId: string) => api.factoryRealShortlist(runId),
+    portfolio:    async (_runId: string) => ({ results: [], notes: "Portfolio what-if not wired for Real tab in MVP." }),
+    chat:         (runId: string, q: string) => api.factoryRealChat(runId, q),
+    promoteFor:   (runId: string, variantId: string) => api.factoryRealPromoteVariant(runId, variantId),
+    pollIntervalMs: 3000,
+    pollTimesOutAfter: undefined as number | undefined,
+  },
+};
+
 export default function ModelFactory() {
-  const [runs, setRuns] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // AI Agent state (optional)
-  const [agentEnabled, setAgentEnabled] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<any>(null);
-  const [agentResult, setAgentResult] = useState<any>(null);
-  const [agentLoading, setAgentLoading] = useState(false);
-  const [showTransparency, setShowTransparency] = useState(false);
-
-  useEffect(() => {
-    api.getFactoryRuns().then(setRuns).finally(() => setLoading(false));
-    api.getAgentStatus().then(setAgentStatus).catch(() => {});
-  }, []);
-
-  const runAgent = async () => {
-    setAgentLoading(true);
-    try {
-      const result = await api.runAgentAnalysis();
-      setAgentResult(result);
-    } catch (err: any) {
-      setAgentResult({ success: false, error: err.message });
-    } finally {
-      setAgentLoading(false);
-    }
-  };
-
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading factory runs...</div>;
-
+  const [mode, setMode] = useState<Mode>('demo');
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Model Factory</h2>
-          <p className="text-gray-500 mt-1">Review model factory runs and approve models for production</p>
-        </div>
+      <div className="mb-4">
+        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <FlaskConical className="w-6 h-6 text-indigo-600" /> Model Factory
+        </h2>
+        <p className="text-gray-500 mt-1">
+          Systematic generation and review of many candidate models. Four steps: analyse &amp; plan,
+          train, review, selectively package for promotion.
+        </p>
       </div>
 
-      {/* Context panels */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-          <h4 className="text-xs font-semibold text-purple-800 uppercase tracking-wide mb-1">Databricks features demonstrated</h4>
-          <div className="flex flex-wrap gap-1.5">
-            {["MLflow experiment tracking", "UC model registry", "Automated model evaluation", "Regulatory suitability scoring", "PDF model reports", "Foundation Model API (optional)"].map(f => (
-              <span key={f} className="px-2 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700">{f}</span>
-            ))}
-          </div>
-        </div>
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wide mb-1">Why it matters for actuaries</h4>
-          <p className="text-xs text-amber-700">
-            Replaces the manual model comparison process. The factory trains 20+ model configurations,
-            ranks them on insurance-specific metrics (Gini, PSI, regulatory suitability), and presents
-            a leaderboard for actuarial sign-off — with a one-click PDF report for regulators.
-          </p>
-        </div>
+      <div className="flex gap-1 border-b border-gray-200 mb-5">
+        <button onClick={() => setMode('demo')}
+                className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition ${
+                  mode === 'demo' ? 'border-indigo-600 text-indigo-700 bg-white'
+                                  : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+          Demo <span className="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">virtual</span>
+        </button>
+        <button onClick={() => setMode('real')}
+                className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition ${
+                  mode === 'real' ? 'border-emerald-600 text-emerald-700 bg-white'
+                                  : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+          Real <span className="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">fits models</span>
+        </button>
       </div>
 
-      {/* ── Agentic Planner (plan a new factory run) ── */}
-      <AgenticPlanner onSubmitted={() => api.getFactoryRuns().then(setRuns)} />
-
-      {/* ── AI Assistant Toggle (OPTIONAL) ── */}
-      <div className="mb-6 bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Bot className={`w-5 h-5 ${agentEnabled ? 'text-purple-600' : 'text-gray-400'}`} />
-            <div>
-              <span className="text-sm font-medium text-gray-800">AI Model Selection Assistant</span>
-              <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-600 border border-purple-200">
-                OPTIONAL
-              </span>
-            </div>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" checked={agentEnabled} onChange={(e) => setAgentEnabled(e.target.checked)}
-              className="sr-only peer" />
-            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-          </label>
-        </div>
-        {agentEnabled && (
-          <div className="mt-3 text-xs text-gray-500 border-t pt-3">
-            Uses Foundation Model API ({agentStatus?.endpoint || 'loading...'}) to analyse the Unified Pricing
-            Table and recommend which models to train. The AI recommends — you decide.
-            {agentStatus?.available === false && (
-              <span className="block mt-1 text-amber-600">Agent unavailable: {agentStatus?.message}</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── AI Analysis Panel ── */}
-      {agentEnabled && (
-        <div className="mb-6 space-y-4">
-          {!agentResult && !agentLoading && (
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-6 text-center">
-              <Bot className="w-10 h-10 text-purple-400 mx-auto mb-3" />
-              <p className="text-purple-700 font-medium mb-3">
-                Run the AI assistant to analyse your feature table and recommend models
-              </p>
-              <button onClick={runAgent} disabled={!agentStatus?.available}
-                className="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors inline-flex items-center gap-2">
-                <Bot className="w-4 h-4" /> Run Analysis
-              </button>
-            </div>
-          )}
-
-          {agentLoading && <AgentProgress />}
-
-          {agentResult && agentResult.success && (
-            <>
-              {/* Disclaimer */}
-              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 flex items-center gap-2">
-                <Shield className="w-4 h-4 text-amber-600 shrink-0" />
-                <span className="text-xs text-amber-700">
-                  AI-assisted recommendation — review before approving. All LLM interactions are logged and auditable.
-                </span>
-              </div>
-
-              {/* Overall strategy */}
-              <div className="bg-white rounded-lg border border-gray-200 p-5">
-                <h3 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                  <Bot className="w-4 h-4 text-purple-600" /> Recommended Strategy
-                </h3>
-                <p className="text-sm text-gray-700">{agentResult.recommendations?.overall_strategy}</p>
-
-                {/* Data quality observations */}
-                {agentResult.recommendations?.data_quality_observations?.length > 0 && (
-                  <div className="mt-3 border-t pt-3">
-                    <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Data Quality Observations</h4>
-                    <ul className="text-sm text-gray-600 space-y-1">
-                      {agentResult.recommendations.data_quality_observations.map((obs: string, i: number) => (
-                        <li key={i} className="flex items-start gap-1.5">
-                          <span className="text-amber-500 mt-1">-</span> {obs}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-
-              {/* Individual recommendations */}
-              <div className="grid gap-3">
-                {agentResult.recommendations?.recommendations?.map((rec: any, i: number) => (
-                  <div key={i} className="bg-white rounded-lg border border-gray-200 p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          rec.priority === 'high' ? 'bg-red-50 text-red-700 border border-red-200' :
-                          rec.priority === 'medium' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                          'bg-blue-50 text-blue-700 border border-blue-200'
-                        }`}>{rec.priority}</span>
-                        <h4 className="font-semibold text-gray-900">{rec.model_name}</h4>
-                      </div>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        rec.model_type.startsWith('GLM') ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
-                      }`}>{rec.model_type}</span>
-                    </div>
-                    <p className="text-sm text-gray-600 mb-2">{rec.purpose}</p>
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <span className="text-gray-500 font-medium">Target:</span>{' '}
-                        <code className="bg-gray-100 px-1 py-0.5 rounded">{rec.target_variable}</code>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 font-medium">Features:</span>{' '}
-                        {rec.recommended_features?.length || 0} selected
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">{rec.feature_rationale}</p>
-                    {rec.regulatory_notes && (
-                      <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                        <Shield className="w-3 h-3" /> {rec.regulatory_notes}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Transparency panel */}
-              <div className="bg-gray-50 rounded-lg border border-gray-200">
-                <button onClick={() => setShowTransparency(!showTransparency)}
-                  className="w-full px-4 py-3 text-left flex items-center justify-between text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors">
-                  <span className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-gray-500" />
-                    Transparency — Full LLM Interaction
-                    {agentResult.token_usage?.total_tokens && (
-                      <span className="text-xs text-gray-400">({agentResult.token_usage.total_tokens} tokens)</span>
-                    )}
-                  </span>
-                  {showTransparency ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                {showTransparency && (
-                  <div className="px-4 pb-4 space-y-3 border-t">
-                    <div className="mt-3">
-                      <h5 className="text-xs font-semibold text-gray-500 uppercase mb-1">Model Endpoint</h5>
-                      <code className="text-xs bg-white border rounded px-2 py-1">{agentResult.endpoint}</code>
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-semibold text-gray-500 uppercase mb-1">System Prompt</h5>
-                      <pre className="text-xs bg-white border rounded p-2 overflow-x-auto max-h-32 whitespace-pre-wrap">
-                        {agentResult.transparency?.system_prompt}
-                      </pre>
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-semibold text-gray-500 uppercase mb-1">User Prompt (Data Profile)</h5>
-                      <pre className="text-xs bg-white border rounded p-2 overflow-x-auto max-h-40 whitespace-pre-wrap">
-                        {agentResult.transparency?.user_prompt}
-                      </pre>
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-semibold text-gray-500 uppercase mb-1">Raw LLM Response</h5>
-                      <pre className="text-xs bg-white border rounded p-2 overflow-x-auto max-h-60 whitespace-pre-wrap">
-                        {agentResult.transparency?.raw_response}
-                      </pre>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-700">
-                      <strong>Governance note:</strong> This interaction is logged in the audit trail (event_type: agent_recommendation).
-                      A regulatory auditor can reconstruct exactly what the AI recommended, what data it saw,
-                      and which human approved or rejected the recommendation.
-                      Unlike black-box SaaS tools, every LLM call in Databricks is logged via AI Gateway
-                      with full prompt/response capture, token usage, and user identity.
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Re-run button */}
-              <div className="text-center">
-                <button onClick={runAgent} disabled={agentLoading}
-                  className="text-sm text-purple-600 hover:text-purple-800 font-medium">
-                  Re-run analysis
-                </button>
-              </div>
-            </>
-          )}
-
-          {agentResult && !agentResult.success && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm">
-              <p className="text-red-700 font-medium">AI analysis could not parse recommendations.</p>
-              <p className="text-red-600 mt-1">{agentResult.error || 'The LLM responded but the output was not valid JSON.'}</p>
-              {agentResult.raw_response_preview && (
-                <pre className="mt-2 text-xs bg-white border rounded p-2 max-h-32 overflow-auto whitespace-pre-wrap text-gray-600">
-                  {agentResult.raw_response_preview}
-                </pre>
-              )}
-              <p className="text-gray-500 mt-2 text-xs">The demo works normally without AI assistance. Try running again.</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Factory Runs List ── */}
-      {runs.length === 0 ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-          <FlaskConical className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-700 mb-2">No factory runs yet</h3>
-          <p className="text-gray-500 max-w-md mx-auto">
-            Run the Model Factory pipeline from the Databricks workflow to generate model candidates.
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {runs.map((run) => {
-            const allDecided = Number(run.models_decided || 0) >= Number(run.models_succeeded || 0) && Number(run.models_succeeded || 0) > 0;
-            const hasApprovals = Number(run.models_approved || 0) > 0;
-
-            return (
-              <Link
-                key={run.factory_run_id}
-                to={`/models/${encodeURIComponent(run.factory_run_id)}`}
-                className="bg-white rounded-lg border border-gray-200 p-5 hover:border-blue-300 hover:shadow-md transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center">
-                      <FlaskConical className="w-5 h-5 text-purple-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors font-mono">
-                        {run.factory_run_id}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        Started {run.started_at ? new Date(run.started_at).toLocaleString() : 'Unknown'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <div className="text-sm text-gray-500">Planned</div>
-                      <div className="text-sm font-medium">{run.models_planned}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm text-gray-500">Trained</div>
-                      <div className="text-sm font-medium text-green-600">
-                        {run.models_succeeded}
-                        {Number(run.models_failed) > 0 && (
-                          <span className="text-red-500 ml-1">({run.models_failed} failed)</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm text-gray-500">Approved</div>
-                      <div className="text-sm font-medium">{run.models_approved || 0}</div>
-                    </div>
-                    {allDecided ? (
-                      hasApprovals ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Complete
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200">
-                          <AlertTriangle className="w-3.5 h-3.5" /> All Rejected
-                        </span>
-                      )
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                        <Clock className="w-3.5 h-3.5" /> Review Needed
-                      </span>
-                    )}
-                    <a href={api.downloadRunLogReport(run.factory_run_id)} target="_blank" rel="noopener noreferrer"
-                      onClick={e => e.stopPropagation()}
-                      title="Export full run log (PDF)"
-                      className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-100">
-                      <FileText className="w-3.5 h-3.5" /> Run log
-                    </a>
-                    <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500" />
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      )}
+      <FactoryFlow key={mode} mode={mode} />
     </div>
   );
 }
 
-
-function AgentProgress() {
-  const [step, setStep] = useState(0);
-  const steps = [
-    { label: 'Connecting to Foundation Model API', detail: 'Authenticating with Claude via Databricks FMAPI' },
-    { label: 'Profiling Unified Pricing Table', detail: 'Reading column statistics, types, and distributions' },
-    { label: 'Building analysis prompt', detail: 'Composing the feature profile for the LLM' },
-    { label: 'Waiting for AI response', detail: 'Claude is analysing 90+ features across 50K policies...' },
-    { label: 'Parsing recommendations', detail: 'Extracting model configurations from the response' },
-    { label: 'Logging to audit trail', detail: 'Recording the full LLM interaction for governance' },
-  ];
-
-  useEffect(() => {
-    const timers = [
-      setTimeout(() => setStep(1), 1500),
-      setTimeout(() => setStep(2), 3000),
-      setTimeout(() => setStep(3), 5000),
-      setTimeout(() => setStep(4), 8000),
-      setTimeout(() => setStep(5), 20000),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
-  return (
-    <div className="bg-white border border-purple-200 rounded-lg p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <Loader2 className="w-5 h-5 text-purple-600 animate-spin" />
-        <h3 className="font-semibold text-gray-900">AI Analysis in Progress</h3>
-      </div>
-      <div className="space-y-2">
-        {steps.map((s, i) => (
-          <div key={i} className={`flex items-center gap-3 py-1.5 transition-all duration-500 ${
-            i < step ? 'opacity-100' : i === step ? 'opacity-100' : 'opacity-30'
-          }`}>
-            <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition-colors duration-500 ${
-              i < step ? 'bg-green-500' : i === step ? 'bg-purple-500 animate-pulse' : 'bg-gray-200'
-            }`}>
-              {i < step ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-              ) : i === step ? (
-                <Loader2 className="w-3 h-3 text-white animate-spin" />
-              ) : (
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
-              )}
-            </div>
-            <div>
-              <span className={`text-sm font-medium ${i <= step ? 'text-gray-800' : 'text-gray-400'}`}>{s.label}</span>
-              {i === step && (
-                <p className="text-xs text-purple-600 mt-0.5">{s.detail}</p>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-      <p className="text-xs text-gray-400 mt-4">This typically takes 15-30 seconds. The full prompt and response will be visible in the Transparency panel.</p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Agentic Planner — plan a new factory run via dropdowns + Claude
-// ---------------------------------------------------------------------------
-
-type FeatureAnalysis = {
-  headline?: string;
-  strengths?: string[];
-  gaps?: string[];
-  sensitive?: string[];
-  recommended_next?: { target: string; why: string }[];
-} | null;
-
-function AgenticPlanner({ onSubmitted }: { onSubmitted: () => void }) {
-  const [analysis, setAnalysis] = useState<FeatureAnalysis>(null);
-  const [analysisRaw, setAnalysisRaw] = useState<string | null>(null);
-  const [analysisLoading, setAnalysisLoading] = useState(true);
-
-  // Intent dropdowns
-  const [target, setTarget] = useState('claim_count_5y');
-  const [modelFamily, setModelFamily] = useState('GLM_Poisson');
-  const [featureScope, setFeatureScope] = useState('plus_real_uk');
-  const [sweepSize, setSweepSize] = useState(10);
-  const [focus, setFocus] = useState('exploration');
-  const [note, setNote] = useState('');
-
-  // Proposal state
-  const [plan, setPlan] = useState<any>(null);
+function FactoryFlow({ mode }: { mode: Mode }) {
+  const apiSet = API_BY_MODE[mode];
+  const [step, setStep]       = useState<Step>('plan');
+  const [family, setFamily]   = useState<string>('freq_glm');
+  const [plan, setPlan]       = useState<Variant[] | null>(null);
+  const [narrative, setNarrative] = useState<string>('');
   const [proposing, setProposing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitResult, setSubmitResult] = useState<any>(null);
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.analyseFeatures()
-      .then(r => { setAnalysis(r?.analysis || null); setAnalysisRaw(r?.raw || null); })
-      .catch(() => {})
-      .finally(() => setAnalysisLoading(false));
-  }, []);
+  const [unsupportedMsg, setUnsupportedMsg] = useState<string | null>(null);
+  const [runId, setRunId]     = useState<string | null>(null);
+  const [runStatus, setRunStatus] = useState<any>(null);
+  const [selected, setSelected]  = useState<Set<string>>(new Set());
+  const [toast, setToast]     = useState<string | null>(null);
 
   const propose = async () => {
-    setProposing(true); setErrMsg(null); setPlan(null); setSubmitResult(null);
+    setProposing(true);
+    setUnsupportedMsg(null);
+    setPlan(null);
     try {
-      const r = await api.proposePlan({
-        target, model_family: modelFamily, feature_scope: featureScope,
-        sweep_size: sweepSize, focus, note: note || undefined,
-      });
-      if (!r.success || !r.plan) {
-        setErrMsg(r.error || 'Agent did not return a valid plan. Raw response saved for debug.');
+      const r = await apiSet.propose(family);
+      if (r.status === 'unsupported') {
+        setUnsupportedMsg(r.message);
       } else {
         setPlan(r.plan);
+        setNarrative(r.narrative);
       }
     } catch (e: any) {
-      setErrMsg(String(e?.message || e));
+      setToast(`Plan failed: ${e.message}`);
     } finally {
       setProposing(false);
     }
   };
 
-  const submit = async () => {
+  const approve = async () => {
     if (!plan) return;
-    setSubmitting(true); setSubmitResult(null); setErrMsg(null);
     try {
-      const r = await api.submitPlan({
-        intent: { target, model_family: modelFamily, feature_scope: featureScope, sweep_size: sweepSize, focus, note },
-        plan_summary: plan.plan_summary,
-        configs: plan.configs || [],
-        feature_analysis_text: analysis ? JSON.stringify(analysis) : (analysisRaw || undefined),
-      });
-      setSubmitResult(r);
-      onSubmitted();
+      const r = await apiSet.approve(family, plan, narrative);
+      setRunId(r.run_id);
+      setStep('train');
     } catch (e: any) {
-      setErrMsg(String(e?.message || e));
-    } finally {
-      setSubmitting(false);
+      setToast(`Approve failed: ${e.message}`);
     }
   };
 
+  useEffect(() => {
+    if (!runId || step !== 'train') return;
+    let done = false;
+    const poll = async () => {
+      try {
+        const r = await apiSet.getRun(runId);
+        setRunStatus(r);
+        if (r.status === 'COMPLETED' && !done) {
+          done = true;
+          setTimeout(() => setStep('review'), 600);
+        }
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, apiSet.pollIntervalMs);
+    return () => clearInterval(t);
+  }, [runId, step]);
+
+  const familyMeta = FAMILIES.find(f => f.key === family);
+
   return (
-    <div className="mb-6 bg-white border border-emerald-200 rounded-lg overflow-hidden">
-      <div className="px-5 py-3 bg-emerald-50 border-b border-emerald-200 flex items-center gap-2">
-        <Sparkles className="w-4 h-4 text-emerald-700" />
-        <h3 className="font-semibold text-emerald-800 text-sm">Plan a factory run</h3>
-        <span className="text-xs text-emerald-600">Claude reads your feature catalog; you pick the shape of the sweep.</span>
-      </div>
+    <>
+      <Stepper step={step} />
 
-      {/* Feature analysis (Claude-backed, auto-runs) */}
-      <div className="px-5 py-4 border-b bg-gradient-to-b from-emerald-50/40 to-transparent">
-        <div className="text-[11px] font-medium text-emerald-700 uppercase tracking-wide mb-1.5">
-          Feature-store analysis
-        </div>
-        {analysisLoading && (
-          <div className="flex items-center gap-2 text-xs text-gray-500"><Loader2 className="w-3 h-3 animate-spin" /> Claude is analysing your features…</div>
-        )}
-        {!analysisLoading && analysis && (
-          <div className="space-y-1.5 text-sm text-gray-800">
-            {analysis.headline && <div className="font-medium text-gray-900">{analysis.headline}</div>}
-            <div className="grid grid-cols-2 gap-4 text-xs">
-              {!!(analysis.strengths || []).length && (
-                <div>
-                  <div className="text-[10px] font-medium text-green-700 uppercase tracking-wide mb-0.5">Strengths</div>
-                  <ul className="list-disc list-inside text-gray-700 space-y-0.5">
-                    {analysis.strengths!.map((s, i) => <li key={i}>{s}</li>)}
-                  </ul>
-                </div>
-              )}
-              {!!(analysis.gaps || []).length && (
-                <div>
-                  <div className="text-[10px] font-medium text-amber-700 uppercase tracking-wide mb-0.5">Gaps</div>
-                  <ul className="list-disc list-inside text-gray-700 space-y-0.5">
-                    {analysis.gaps!.map((s, i) => <li key={i}>{s}</li>)}
-                  </ul>
-                </div>
-              )}
-            </div>
-            {!!(analysis.sensitive || []).length && (
-              <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 mt-1 inline-flex items-center gap-1">
-                <Shield className="w-3 h-3" /> {analysis.sensitive!.join(' · ')}
-              </div>
-            )}
-            {!!(analysis.recommended_next || []).length && (
-              <div className="text-xs text-gray-600 mt-1">
-                <span className="font-medium">Suggested next targets:</span>{' '}
-                {analysis.recommended_next!.map((r, i) => (
-                  <span key={r.target}>
-                    <code className="bg-gray-100 px-1 rounded">{r.target}</code>
-                    <span className="text-gray-500"> — {r.why}</span>
-                    {i < analysis.recommended_next!.length - 1 ? '; ' : ''}
-                  </span>
-                ))}
-              </div>
-            )}
+      {mode === 'demo' ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 mb-4 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
+          <div>
+            <strong>Demo — virtual training.</strong> Variants are generated from the plan and
+            metrics are synthesised deterministically — no actual model fit runs. Portfolio
+            what-if and pack generation are synthesised too. Switch to the <strong>Real</strong>{' '}
+            tab above to fit variants against the live Modelling Mart.
           </div>
-        )}
-        {!analysisLoading && !analysis && (
-          <div className="text-xs text-gray-500">Feature analysis not available. (Populate <code className="bg-gray-100 px-1 rounded">feature_catalog</code> via the build_upt job.)</div>
-        )}
-      </div>
-
-      {/* Intent dropdowns */}
-      <div className="px-5 py-4 grid grid-cols-5 gap-3">
-        <Dropdown label="Target" value={target} onChange={setTarget} options={[
-          ['claim_count_5y',   'Frequency — claim_count_5y'],
-          ['total_incurred_5y','Severity — total_incurred_5y'],
-          ['loss_ratio_5y',    'Loss ratio — loss_ratio_5y'],
-        ]} />
-        <Dropdown label="Model family" value={modelFamily} onChange={setModelFamily} options={[
-          ['GLM_Poisson',     'GLM · Poisson'],
-          ['GLM_Gamma',       'GLM · Gamma'],
-          ['GBM_Classifier',  'GBM · Classifier'],
-          ['GBM_Regressor',   'GBM · Regressor'],
-        ]} />
-        <Dropdown label="Feature scope" value={featureScope} onChange={setFeatureScope} options={[
-          ['all',                 'All features'],
-          ['baseline_only',       'Baseline only'],
-          ['plus_real_uk',        'Baseline + real UK enrichment'],
-          ['exclude_regulatory',  'Exclude regulatory-sensitive'],
-        ]} />
-        <Dropdown label="Sweep size" value={String(sweepSize)} onChange={v => setSweepSize(parseInt(v, 10))} options={[
-          ['5', '5 configs'], ['10', '10 configs'], ['20', '20 configs'], ['50', '50 configs'],
-        ]} />
-        <Dropdown label="Focus" value={focus} onChange={setFocus} options={[
-          ['exploration',       'Fresh exploration'],
-          ['interaction_terms', 'Interaction terms'],
-          ['hyperparam_sweep',  'Hyperparameter sweep'],
-          ['feature_ablation',  'Feature ablation'],
-        ]} />
-      </div>
-
-      <div className="px-5 pb-4">
-        <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">
-          Optional note for the agent
-        </label>
-        <textarea value={note} onChange={e => setNote(e.target.value)}
-          rows={2} placeholder="e.g. focus on interaction between urban_score and claim_count_5y; avoid regulatory-sensitive features on this run"
-          className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none" />
-
-        <div className="mt-3 flex items-center justify-between">
-          <button onClick={propose} disabled={proposing}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700 disabled:opacity-50">
-            {proposing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            {proposing ? 'Claude is proposing…' : 'Propose plan'}
-          </button>
-          {errMsg && <span className="text-xs text-red-600">{errMsg}</span>}
         </div>
-      </div>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-900 mb-4 flex items-start gap-2">
+          <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-emerald-700" />
+          <div>
+            <strong>Real — fits models.</strong> Each variant is fitted on the real Modelling Mart
+            via the <code className="bg-white px-1 rounded">v1 — Factory training (real)</code> job
+            on serverless compute. Metrics, CV Gini, relativities are all real. Registered UC models
+            land as <code className="bg-white px-1 rounded">factory_freq_glm_*</code> — separate
+            namespace from the 4 production champions. <strong>Factory candidates never claim the{' '}
+            <code>champion</code> alias</strong>; they stay out of deployment. Training a 15-variant
+            plan takes ~3-5 min.
+          </div>
+        </div>
+      )}
 
-      {/* Proposal preview */}
-      {plan && (
-        <div className="border-t border-gray-200 px-5 py-4 bg-gray-50/50">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <div className="text-[11px] font-medium text-emerald-700 uppercase tracking-wide">Proposed plan</div>
-              <div className="text-sm text-gray-800 mt-0.5">{plan.plan_summary}</div>
-              <div className="text-[11px] text-gray-500 mt-0.5">{(plan.configs || []).length} configs proposed</div>
+      {step === 'plan' && (
+        <StepPlan
+          family={family}
+          setFamily={setFamily}
+          proposing={proposing}
+          propose={propose}
+          plan={plan}
+          narrative={narrative}
+          unsupported={unsupportedMsg}
+          approve={approve}
+          supported={mode === 'demo' ? !!familyMeta?.supported : family === 'freq_glm'}
+          mode={mode}
+        />
+      )}
+
+      {step === 'train' && runId && (
+        <StepTrain runId={runId} runStatus={runStatus} mode={mode} />
+      )}
+
+      {(step === 'review' || step === 'pack') && runId && (
+        <StepReview
+          runId={runId}
+          mode={mode}
+          apiSet={apiSet}
+          selected={selected}
+          setSelected={setSelected}
+          onPackFor={async (variantId) => {
+            try {
+              const r = await apiSet.promoteFor(runId, variantId);
+              setToast(r.message || 'Queued');
+              setStep('pack');
+            } catch (e: any) {
+              setToast(`Queue failed: ${e.message}`);
+            }
+          }}
+          atPackStep={step === 'pack'}
+        />
+      )}
+
+      {toast && (
+        <div onClick={() => setToast(null)}
+             className="fixed bottom-4 right-4 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50 cursor-pointer max-w-md">
+          {toast}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Stepper header
+// ---------------------------------------------------------------------------
+
+function Stepper({ step }: { step: Step }) {
+  const stages: { id: Step; label: string; icon: any }[] = [
+    { id: 'plan',   label: 'Analyse & plan',    icon: ClipboardList },
+    { id: 'train',  label: 'Train',             icon: Play },
+    { id: 'review', label: 'Review',            icon: Target },
+    { id: 'pack',   label: 'Selective packaging', icon: PackageCheck },
+  ];
+  const current = stages.findIndex(s => s.id === step);
+  return (
+    <div className="flex items-center gap-2 mb-5">
+      {stages.map((s, i) => (
+        <>
+          <div key={s.id}
+               className={`flex-1 flex items-center gap-2 rounded-lg px-3 py-2 border ${
+                 i === current ? 'bg-indigo-50 border-indigo-200 text-indigo-800' :
+                 i <  current ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+                                'bg-white border-gray-200 text-gray-500'
+               }`}>
+            {i < current
+              ? <Check className="w-4 h-4" />
+              : <s.icon className="w-4 h-4" />}
+            <span className="text-sm font-medium">{i + 1}. {s.label}</span>
+          </div>
+          {i < stages.length - 1 &&
+            <ChevronRight key={`sep-${i}`} className="w-4 h-4 text-gray-400 shrink-0" />}
+        </>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step 1 — Analyse & plan
+// ---------------------------------------------------------------------------
+
+function StepPlan({ family, setFamily, proposing, propose, plan, narrative, unsupported, approve, supported, mode = 'demo' }:
+  {
+    family: string; setFamily: (f: string) => void;
+    proposing: boolean; propose: () => void;
+    plan: Variant[] | null; narrative: string;
+    unsupported: string | null;
+    approve: () => void;
+    supported: boolean;
+    mode?: 'demo' | 'real';
+  }) {
+  return (
+    <div className="space-y-4">
+      <section className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <label className="text-xs text-gray-500 font-medium block mb-1">Model family</label>
+            <div className="flex flex-wrap gap-2">
+              {FAMILIES.map(f => (
+                <button key={f.key}
+                        onClick={() => setFamily(f.key)}
+                        className={`px-3 py-1.5 rounded text-sm font-medium border transition ${
+                          family === f.key
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        } ${!f.supported ? 'opacity-70' : ''}`}>
+                  {f.label}
+                  {!f.supported && <span className={`ml-1.5 text-[9px] px-1 rounded ${family === f.key ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                    soon
+                  </span>}
+                </button>
+              ))}
             </div>
-            <button onClick={submit} disabled={submitting || submitResult}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50">
-              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : submitResult ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-              {submitting ? 'Submitting…' : submitResult ? 'Submitted' : 'Submit to factory'}
+          </div>
+          <button onClick={propose} disabled={proposing || !supported}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 shrink-0">
+            {proposing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            Propose plan
+          </button>
+        </div>
+      </section>
+
+      {unsupported && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+          <AlertTriangle className="w-4 h-4 inline mr-1" /> {unsupported}
+        </div>
+      )}
+
+      {plan && (
+        <>
+          {/* Narrative */}
+          <section className="bg-white border border-gray-200 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+              <Bot className="w-4 h-4 text-violet-600" /> Plan narrative
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 font-medium ml-1">
+                Claude Sonnet 4.6
+              </span>
+            </h3>
+            <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+              {narrative}
+            </div>
+          </section>
+
+          {/* Plan summary */}
+          <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <SummaryTile label="Total variants"         value={plan.length.toString()} />
+            <SummaryTile label="Feature-subset probes"  value={plan.filter(v => v.category === 'feature_subset').length.toString()} />
+            <SummaryTile label="Interaction probes"     value={plan.filter(v => v.category === 'interactions').length.toString()} />
+            <SummaryTile label="Banding probes"         value={plan.filter(v => v.category === 'banding').length.toString()} />
+            <SummaryTile label="Distributional families" value={new Set(plan.map(v => v.glm?.family)).size.toString()} />
+          </section>
+
+          {/* Plan table */}
+          <section className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-800">
+                Proposed variants — actuary review before training
+              </h3>
+              <span className="text-xs text-gray-500">{plan.length} rows</span>
+            </div>
+            <div className="max-h-[440px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-gray-50">
+                  <tr className="text-xs text-gray-500 border-b">
+                    <th className="text-left px-3 py-2 font-medium">ID</th>
+                    <th className="text-left px-3 py-2 font-medium">Name</th>
+                    <th className="text-left px-3 py-2 font-medium">Category</th>
+                    <th className="text-right px-3 py-2 font-medium">Features</th>
+                    <th className="text-left px-3 py-2 font-medium">Interactions</th>
+                    <th className="text-left px-3 py-2 font-medium">Banding</th>
+                    <th className="text-left px-3 py-2 font-medium">GLM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {plan.map(v => (
+                    <tr key={v.variant_id} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="px-3 py-1.5 font-mono text-xs">{v.variant_id}</td>
+                      <td className="px-3 py-1.5 text-xs text-gray-800">{v.name}</td>
+                      <td className="px-3 py-1.5">
+                        <CategoryChip cat={v.category} />
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono text-xs">{v.features?.length || 0}</td>
+                      <td className="px-3 py-1.5 text-xs text-gray-600">
+                        {(v.interactions || []).map(p => p.join(' × ')).join(', ') || '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-xs text-gray-600 font-mono">{v.banding}</td>
+                      <td className="px-3 py-1.5 text-xs text-gray-600">{v.glm?.family}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <div className="flex justify-end">
+            <button onClick={approve}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">
+              <Check className="w-4 h-4" /> Approve plan &amp; train
+              <ArrowRight className="w-4 h-4" />
             </button>
           </div>
-
-          <div className="max-h-64 overflow-y-auto border border-gray-200 rounded bg-white text-xs">
-            <table className="w-full">
-              <thead className="bg-gray-50 text-gray-600 sticky top-0">
-                <tr>
-                  <th className="px-2 py-1 text-left font-medium">Config</th>
-                  <th className="px-2 py-1 text-left font-medium">Features</th>
-                  <th className="px-2 py-1 text-left font-medium">Hyperparams</th>
-                  <th className="px-2 py-1 text-left font-medium">Rationale</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {(plan.configs || []).map((cfg: any) => (
-                  <tr key={cfg.config_id} className="hover:bg-emerald-50">
-                    <td className="px-2 py-1 font-mono font-medium">{cfg.config_id}</td>
-                    <td className="px-2 py-1 text-gray-700">
-                      <div className="truncate max-w-xs">{(cfg.features || []).join(', ')}</div>
-                    </td>
-                    <td className="px-2 py-1 font-mono text-gray-600">
-                      {Object.entries(cfg.hyperparams || {}).map(([k, v]) => `${k}=${v}`).join(', ') || '—'}
-                    </td>
-                    <td className="px-2 py-1 text-gray-700">{cfg.rationale}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {submitResult && (
-            <div className="mt-3 bg-green-50 border border-green-200 rounded px-3 py-2 text-xs text-green-800">
-              <div className="font-medium">Submitted as factory run <code className="bg-white px-1 rounded">{submitResult.factory_run_id}</code></div>
-              <div className="mt-0.5 text-green-700">{submitResult.next_step}</div>
-            </div>
-          )}
-        </div>
+        </>
       )}
     </div>
   );
 }
 
-function Dropdown({ label, value, onChange, options }: {
-  label: string; value: string; onChange: (v: string) => void; options: [string, string][];
-}) {
+function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">{label}</label>
-      <select value={value} onChange={e => onChange(e.target.value)}
-        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
-        {options.map(([v, lbl]) => <option key={v} value={v}>{lbl}</option>)}
-      </select>
+    <div className="bg-white border border-gray-200 rounded-lg p-3">
+      <div className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className="text-2xl font-semibold text-gray-900 mt-0.5">{value}</div>
     </div>
+  );
+}
+
+function CategoryChip({ cat }: { cat: Variant['category'] }) {
+  const styles = {
+    feature_subset: 'bg-blue-100 text-blue-700',
+    interactions:   'bg-purple-100 text-purple-700',
+    banding:        'bg-amber-100 text-amber-700',
+  }[cat];
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${styles}`}>
+    {cat.replace('_', ' ')}
+  </span>;
+}
+
+// ---------------------------------------------------------------------------
+// Step 2 — Train (virtual)
+// ---------------------------------------------------------------------------
+
+function StepTrain({ runId, runStatus, mode = 'demo' }: { runId: string; runStatus: any; mode?: 'demo' | 'real' }) {
+  const total = runStatus?.variant_count || 50;
+  const complete = runStatus?.n_complete || 0;
+  const pct = runStatus?.progress ? Math.round(runStatus.progress * 100) : 0;
+
+  return (
+    <div className="space-y-4">
+      <section className="bg-white border border-gray-200 rounded-lg p-5">
+        <div className="flex items-center gap-3 mb-3">
+          {runStatus?.status === 'COMPLETED'
+            ? <Check className="w-5 h-5 text-emerald-600" />
+            : <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800">
+              {runStatus?.status === 'COMPLETED' ? 'Training complete' : 'Training in progress…'}
+            </h3>
+            <p className="text-xs text-gray-500">Run {runId} · {complete} of {total} variants trained</p>
+          </div>
+          <div className="ml-auto text-right text-xs text-gray-500">
+            <div>Elapsed: {runStatus?.elapsed_seconds?.toFixed(1) || 0}s</div>
+            <div className={`text-[10px] ${mode === 'real' ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {mode === 'real' ? 'Real fit on serverless' : 'Virtual — synthesised metrics'}
+            </div>
+          </div>
+        </div>
+        <div className="w-full h-3 bg-gray-100 rounded overflow-hidden">
+          <div className={`h-full transition-all duration-700 ${mode === 'real' ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+               style={{ width: `${pct}%` }} />
+        </div>
+        <div className="text-[11px] text-gray-500 mt-2">
+          {mode === 'real'
+            ? <>Each variant is being fitted via the <code>v1 — Factory training (real)</code> Databricks
+               Job on serverless. Real MLflow runs are logged to <code>/Users/[you]/pricing_workbench_factory</code>,
+               and each variant registers as a UC model <code>factory_freq_glm_&lt;id&gt;</code>.</>
+            : <>In the real training flow this is a Databricks Job over serverless compute, one task per variant,
+               logging each to MLflow under <code>/Shared/pricing_demo/factory/</code>.</>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 — Review (leaderboard / shortlist / portfolio / agent chat)
+// ---------------------------------------------------------------------------
+
+function StepReview({ runId, selected, setSelected, onPackFor, atPackStep, mode = 'demo', apiSet }: {
+  runId: string;
+  selected: Set<string>;
+  setSelected: (s: Set<string>) => void;
+  onPackFor: (variantId: string) => void;
+  atPackStep: boolean;
+  mode?: 'demo' | 'real';
+  apiSet: typeof API_BY_MODE['demo'];
+}) {
+  const [tier, setTier]           = useState<'leaderboard' | 'shortlist' | 'portfolio'>('leaderboard');
+  const [lb, setLb]               = useState<Variant[]>([]);
+  const [short, setShort]         = useState<Variant[]>([]);
+  const [portfolio, setPortfolio] = useState<any>(null);
+
+  useEffect(() => {
+    apiSet.leaderboard(runId).then((d: any) => setLb(d.variants || []));
+    apiSet.shortlist(runId).then((d: any) => setShort(d.shortlist || []));
+    apiSet.portfolio(runId).then(setPortfolio);
+  }, [runId, mode]);
+
+  const toggleSelected = (vid: string) => {
+    const next = new Set(selected);
+    if (next.has(vid)) next.delete(vid);
+    else next.add(vid);
+    setSelected(next);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Tier tabs */}
+      <div className="bg-white rounded-lg border border-gray-200 p-1 inline-flex gap-1">
+        <TierButton active={tier === 'leaderboard'} onClick={() => setTier('leaderboard')}
+                    icon={<Trophy className="w-3.5 h-3.5" />} label="Leaderboard" />
+        <TierButton active={tier === 'shortlist'}   onClick={() => setTier('shortlist')}
+                    icon={<Target className="w-3.5 h-3.5" />} label="Shortlist (top 5)" />
+        {mode === 'demo' && (
+          <TierButton active={tier === 'portfolio'}   onClick={() => setTier('portfolio')}
+                      icon={<Layers className="w-3.5 h-3.5" />} label="Portfolio what-if" />
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 space-y-4">
+          {tier === 'leaderboard' && <LeaderboardTable variants={lb} />}
+          {tier === 'shortlist'   && (
+            <ShortlistTable shortlist={short} selected={selected} onToggle={toggleSelected} onPackFor={onPackFor} mode={mode} />
+          )}
+          {tier === 'portfolio' && mode === 'demo' && portfolio && <PortfolioCards portfolio={portfolio} />}
+        </div>
+        <div className="lg:col-span-1">
+          <ChatPane runId={runId} apiSet={apiSet} />
+        </div>
+      </div>
+
+      {/* Selective-packaging footer */}
+      {tier === 'shortlist' && selected.size > 0 && (
+        <section className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-semibold text-indigo-900 flex items-center gap-1.5">
+                <PackageCheck className="w-4 h-4" /> {selected.size} variant{selected.size > 1 ? 's' : ''} selected for packaging
+              </h4>
+              <p className="text-xs text-indigo-800 mt-0.5">
+                Triggers governance pack generation per variant. Packaged variants become available in the
+                Promote tab of Model Development.
+              </p>
+            </div>
+            <button onClick={() => Array.from(selected).forEach(onPackFor)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700">
+              <PackageCheck className="w-4 h-4" /> Generate pack{selected.size > 1 ? 's' : ''}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {atPackStep && (
+        <section className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm text-emerald-900">
+          <div className="flex items-start gap-2">
+            <Check className="w-4 h-4 mt-0.5 shrink-0" />
+            <div>
+              <strong>Pack generation queued.</strong> In MVP this logs to <code>audit_log</code> but doesn't
+              run the pack notebook — factory candidates are virtual. When real training lands, this button
+              calls the existing <code>governance_pack_generation</code> job per selected variant and the
+              resulting packs show up on the Model Governance tab.
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function TierButton({ active, onClick, icon, label }:
+  { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button onClick={onClick}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition ${
+              active ? 'bg-indigo-600 text-white' : 'text-gray-700 hover:bg-gray-100'
+            }`}>
+      {icon} {label}
+    </button>
+  );
+}
+
+function LeaderboardTable({ variants }: { variants: Variant[] }) {
+  const [sortKey, setSortKey] = useState<'gini' | 'aic' | 'bic' | 'deviance_explained' | 'mae'>('gini');
+
+  const sorted = useMemo(() => {
+    const arr = [...variants];
+    const dir = (sortKey === 'aic' || sortKey === 'bic' || sortKey === 'mae') ? 1 : -1;
+    arr.sort((a, b) => dir * ((a.metrics?.[sortKey] ?? 0) - (b.metrics?.[sortKey] ?? 0)));
+    return arr;
+  }, [variants, sortKey]);
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+          <Trophy className="w-4 h-4" /> Leaderboard — {variants.length} variants
+        </h3>
+        <div className="text-[11px] text-gray-500">Click a column to sort</div>
+      </div>
+      <div className="max-h-[520px] overflow-y-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-gray-50">
+            <tr className="text-xs text-gray-500 border-b">
+              <th className="text-left px-3 py-2 font-medium">ID</th>
+              <th className="text-left px-3 py-2 font-medium">Name</th>
+              <th className="text-left px-3 py-2 font-medium">Cat.</th>
+              <th className="text-right px-3 py-2 font-medium">Feat.</th>
+              <SortHeader current={sortKey} k="gini"               label="Gini" onClick={setSortKey} />
+              <SortHeader current={sortKey} k="aic"                label="AIC"  onClick={setSortKey} />
+              <SortHeader current={sortKey} k="bic"                label="BIC"  onClick={setSortKey} />
+              <SortHeader current={sortKey} k="deviance_explained" label="Dev. expl." onClick={setSortKey} />
+              <SortHeader current={sortKey} k="mae"                label="MAE"  onClick={setSortKey} />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((v, i) => {
+              const m = v.metrics || {};
+              return (
+                <tr key={v.variant_id} className={`border-b last:border-0 hover:bg-gray-50 ${i < 5 ? 'bg-emerald-50/40' : ''}`}>
+                  <td className="px-3 py-1.5 font-mono text-xs">{i + 1}. {v.variant_id}</td>
+                  <td className="px-3 py-1.5 text-xs text-gray-800 truncate max-w-[260px]" title={v.name}>{v.name}</td>
+                  <td className="px-3 py-1.5"><CategoryChip cat={v.category} /></td>
+                  <td className="px-3 py-1.5 text-right text-xs font-mono">{v.n_features}</td>
+                  <td className="px-3 py-1.5 text-right text-xs font-mono font-medium text-indigo-800">{m.gini?.toFixed(4)}</td>
+                  <td className="px-3 py-1.5 text-right text-xs font-mono text-gray-700">{Number(m.aic ?? 0).toFixed(0)}</td>
+                  <td className="px-3 py-1.5 text-right text-xs font-mono text-gray-700">{Number(m.bic ?? 0).toFixed(0)}</td>
+                  <td className="px-3 py-1.5 text-right text-xs font-mono text-gray-700">{m.deviance_explained?.toFixed(4)}</td>
+                  <td className="px-3 py-1.5 text-right text-xs font-mono text-gray-700">{m.mae?.toFixed(4)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function SortHeader({ current, k, label, onClick }:
+  { current: string; k: any; label: string; onClick: (k: any) => void }) {
+  return (
+    <th onClick={() => onClick(k)}
+        className={`text-right px-3 py-2 font-medium cursor-pointer hover:text-indigo-700 ${current === k ? 'text-indigo-700' : ''}`}>
+      {label}{current === k && ' ▼'}
+    </th>
+  );
+}
+
+function ShortlistTable({ shortlist, selected, onToggle, onPackFor, mode = 'demo' }:
+  { shortlist: Variant[]; selected: Set<string>; onToggle: (v: string) => void; onPackFor: (v: string) => void; mode?: 'demo' | 'real' }) {
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b">
+        <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+          <Target className="w-4 h-4" /> Shortlist — top 5 by Gini · auto-selected from the leaderboard
+        </h3>
+      </div>
+      <div className="divide-y">
+        {shortlist.map(v => {
+          const m = v.metrics || {};
+          const cv = v.cv;
+          const isSelected = selected.has(v.variant_id);
+          return (
+            <div key={v.variant_id} className={`p-4 ${isSelected ? 'bg-indigo-50/40' : ''}`}>
+              <div className="flex items-start gap-3">
+                <input type="checkbox" checked={isSelected} onChange={() => onToggle(v.variant_id)}
+                       className="mt-1 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-sm font-semibold">{v.variant_id}</span>
+                    <span className="text-sm text-gray-900">{v.name}</span>
+                    <CategoryChip cat={v.category} />
+                    {cv && <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                      cv.stability === 'stable' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                    }`}>CV {cv.stability}</span>}
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <MiniMetric label="Gini"          value={m.gini?.toFixed(4)} highlight />
+                    <MiniMetric label="AIC / BIC"     value={`${Number(m.aic ?? 0).toFixed(0)} / ${Number(m.bic ?? 0).toFixed(0)}`} />
+                    <MiniMetric label="Dev. explained" value={m.deviance_explained?.toFixed(4)} />
+                    <MiniMetric label="CV Gini ± σ"   value={cv ? `${cv.cv_gini_mean.toFixed(4)} ± ${cv.cv_gini_std.toFixed(4)}` : '—'} />
+                  </div>
+
+                  <div className="mt-3 text-xs text-gray-700">
+                    <strong>Config:</strong> {v.config?.features?.length ?? '?'} features,{' '}
+                    {(v.config?.interactions?.length ?? 0)} interaction{v.config?.interactions?.length === 1 ? '' : 's'},{' '}
+                    banding <code className="text-[11px]">{v.config?.banding}</code>,{' '}
+                    family <code className="text-[11px]">{v.config?.glm?.family}</code>
+                  </div>
+
+                  {v.sign_checks && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {Object.entries(v.sign_checks).map(([feat, sign]) => (
+                        <span key={feat} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 font-mono">
+                          {feat}: {sign}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => onPackFor(v.variant_id)}
+                        title={mode === 'real' ? 'Triggers governance_pack_generation for this factory candidate' : 'Records the pack request in audit log (virtual)'}
+                        className={`shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium text-white ${
+                          mode === 'real' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}>
+                  <PackageCheck className="w-3.5 h-3.5" /> {mode === 'real' ? 'Generate real pack' : 'Pack'}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function MiniMetric({ label, value, highlight }:
+  { label: string; value: string | undefined; highlight?: boolean }) {
+  return (
+    <div className={`border border-gray-200 rounded p-2 ${highlight ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50'}`}>
+      <div className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className={`text-sm font-mono mt-0.5 ${highlight ? 'text-indigo-800 font-semibold' : 'text-gray-800'}`}>
+        {value ?? '—'}
+      </div>
+    </div>
+  );
+}
+
+function PortfolioCards({ portfolio }: { portfolio: any }) {
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+          <Layers className="w-4 h-4" /> Portfolio what-if · top 5 scored on 5000-policy sample
+        </h3>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">
+          Synthesised
+        </span>
+      </div>
+      <div className="p-4 space-y-3">
+        {portfolio.results.map((r: any) => (
+          <div key={r.variant_id} className="border border-gray-200 rounded p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-sm font-semibold">{r.variant_id}</span>
+                <span className="text-sm text-gray-900">{r.name}</span>
+                <span className="text-[10px] text-gray-500">Gini {r.gini.toFixed(4)}</span>
+              </div>
+              <div className={`text-sm font-semibold inline-flex items-center gap-1 ${r.premium_shift_pct >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                {r.premium_shift_pct >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                {r.premium_shift_pct >= 0 ? '+' : ''}{r.premium_shift_pct.toFixed(2)}% vs champion
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+              <MiniMetric label="Sampled policies" value={r.n_policies_sampled.toLocaleString()} />
+              <MiniMetric label="Shifted > 10%" value={r.n_shift_gt_10pct.toString()} />
+              <MiniMetric label="Shifted > 25%" value={r.n_shift_gt_25pct.toString()} />
+              <MiniMetric label="Loss-ratio deciles" value="10 shown below" />
+            </div>
+            <div className="mt-3 flex items-end gap-1 h-14">
+              {r.loss_ratio_deciles.map((d: any) => {
+                const h1 = Math.min(56, d.champion_lr * 40);
+                const h2 = Math.min(56, d.candidate_lr * 40);
+                return (
+                  <div key={d.decile} className="flex-1 flex flex-col items-center gap-0.5">
+                    <div className="w-full flex gap-0.5 items-end h-12">
+                      <div className="flex-1 bg-gray-300 rounded-t" style={{ height: h1 }} title={`Champion LR ${d.champion_lr}`} />
+                      <div className="flex-1 bg-indigo-500 rounded-t" style={{ height: h2 }} title={`Candidate LR ${d.candidate_lr}`} />
+                    </div>
+                    <div className="text-[9px] text-gray-500">{d.decile}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-gray-500 mt-1 flex items-center gap-3">
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 bg-gray-300 rounded-sm"/> Champion</span>
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 bg-indigo-500 rounded-sm"/> Candidate</span>
+              <span className="ml-auto italic">Loss ratio by decile (flatter = better)</span>
+            </div>
+          </div>
+        ))}
+        <div className="text-[11px] text-gray-500 italic">{portfolio.notes}</div>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Agent chat panel — governance pattern, grounded in the factory run
+// ---------------------------------------------------------------------------
+
+const SUGGESTED_QUESTIONS = [
+  "Which variants look most stable by CV?",
+  "Does adding interactions help here?",
+  "Compare the top 3 — what's different about them?",
+  "Which distributional family performs best?",
+  "Any red flags in the shortlist?",
+];
+
+type Turn = {
+  question: string;
+  answer?: string; loading?: boolean;
+  model?: string; cited?: string[];
+  usage?: any; error?: string | null;
+};
+
+function ChatPane({ runId, apiSet }: { runId: string; apiSet: typeof API_BY_MODE['demo'] }) {
+  const [input, setInput]   = useState('');
+  const [turns, setTurns]   = useState<Turn[]>([]);
+  const [busy, setBusy]     = useState(false);
+
+  const ask = async (q: string) => {
+    const question = q.trim();
+    if (!question || busy) return;
+    setBusy(true);
+    setInput('');
+    setTurns(t => [...t, { question, loading: true }]);
+    try {
+      const r = await apiSet.chat(runId, question);
+      setTurns(t => t.map((x, i) =>
+        i === t.length - 1
+          ? { ...x, loading: false, answer: r.answer, model: r.model, cited: r.cited_variants,
+              usage: r.usage, error: r.error }
+          : x));
+    } catch (e: any) {
+      setTurns(t => t.map((x, i) =>
+        i === t.length - 1 ? { ...x, loading: false, error: e.message } : x));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="bg-white rounded-lg border border-gray-200 overflow-hidden sticky top-4">
+      <div className="px-4 py-2.5 bg-violet-50 border-b border-violet-200">
+        <h3 className="text-sm font-semibold text-violet-900 flex items-center gap-1.5 flex-wrap">
+          <Sparkles className="w-4 h-4 text-violet-600" />
+          Factory assistant
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 font-medium">
+            Claude Sonnet 4.6 · grounded in this run
+          </span>
+        </h3>
+      </div>
+      <div className="flex flex-col" style={{ height: '560px' }}>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50">
+          {turns.length === 0 ? (
+            <div className="py-2">
+              <div className="text-xs text-gray-500 mb-2 text-center">Try one of these</div>
+              <div className="flex flex-col gap-1.5">
+                {SUGGESTED_QUESTIONS.map(s => (
+                  <button key={s} onClick={() => ask(s)}
+                          className="text-xs text-left px-3 py-1.5 rounded bg-white border border-gray-200 hover:border-violet-300 hover:bg-violet-50 text-gray-800">
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : turns.map((t, i) => (
+            <div key={i} className="space-y-1">
+              <div className="flex gap-2">
+                <UserCircle2 className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+                <div className="text-sm text-gray-800">{t.question}</div>
+              </div>
+              <div className="flex gap-2 pl-1">
+                <Bot className="w-4 h-4 text-violet-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  {t.loading ? (
+                    <div className="text-xs text-gray-500 italic inline-flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Reading leaderboard…
+                    </div>
+                  ) : t.error ? (
+                    <div className="text-xs text-red-700">
+                      <AlertTriangle className="w-3 h-3 inline mr-1" /> {t.error}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-sm text-gray-900 whitespace-pre-wrap">{t.answer}</div>
+                      <div className="mt-1 flex items-center gap-3 text-[10px] text-gray-500 flex-wrap">
+                        {t.cited && t.cited.length > 0 &&
+                          <span>cites: {t.cited.map(c => `#${c}`).join(', ')}</span>}
+                        {t.usage?.total_tokens != null && <span>tokens: {t.usage.total_tokens}</span>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <form onSubmit={(e: FormEvent) => { e.preventDefault(); ask(input); }}
+              className="border-t bg-white p-2 flex gap-2">
+          <input value={input} onChange={e => setInput(e.target.value)}
+                 placeholder="Ask about the run…"
+                 disabled={busy}
+                 className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm" />
+          <button type="submit" disabled={busy || !input.trim()}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-violet-600 text-white rounded text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+          </button>
+        </form>
+      </div>
+    </section>
   );
 }

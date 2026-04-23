@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from server.routes import datasets, models, agent, features, deployment, governance, quote_stream, genie, development
+from server.routes import datasets, agent, features, deployment, governance, quote_stream, genie, development, review, compare, factory, factory_real
 import os
 from server.config import get_workspace_host
 
@@ -24,8 +24,8 @@ async def lifespan(application: FastAPI):
     logger.info("Starting Pricing Workbench")
     try:
         await datasets.ensure_approvals_table()
-        await models.ensure_model_factory_tables()
-        logger.info("Approvals and model factory tables ready")
+        await factory.ensure_factory_tables()
+        logger.info("Approvals and factory tables ready")
     except Exception:
         logger.exception("Failed to ensure tables — will retry on first request")
     yield
@@ -39,7 +39,6 @@ app = FastAPI(
 )
 
 app.include_router(datasets.router)
-app.include_router(models.router)
 app.include_router(agent.router)
 app.include_router(features.router)
 app.include_router(deployment.router)
@@ -47,6 +46,10 @@ app.include_router(governance.router)
 app.include_router(quote_stream.router)
 app.include_router(genie.router)
 app.include_router(development.router)
+app.include_router(review.router)
+app.include_router(compare.router)
+app.include_router(factory.router)
+app.include_router(factory_real.router)
 
 
 @app.get("/api/health")
