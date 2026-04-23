@@ -15,7 +15,7 @@ import QuoteReview from './pages/QuoteReview';
 const NAV_ITEMS = [
   { to: '/', label: 'Home', icon: HomeIcon, match: (p: string) => p === '/' },
   { to: '/datasets', label: 'Ingestion', icon: Database, match: (p: string) => p.startsWith('/dataset') },
-  { to: '/pricing-table', label: 'Feature Store', icon: Table2, match: (p: string) => p.startsWith('/pricing-table') },
+  { to: '/pricing-table', label: 'Modelling Mart', icon: Table2, match: (p: string) => p.startsWith('/pricing-table') },
   { to: '/development', label: 'Model Development', icon: Code, match: (p: string) => p.startsWith('/development') },
   { to: '/models', label: 'Model Factory', icon: FlaskConical, match: (p: string) => p.startsWith('/models') },
   { to: '/deployment', label: 'Model Deployment', icon: Rocket, match: (p: string) => p.startsWith('/deployment') },

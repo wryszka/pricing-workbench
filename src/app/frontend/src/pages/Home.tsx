@@ -44,9 +44,9 @@ export default function Home() {
           to="/pricing-table"
           icon={Table2}
           color="green"
-          title="Pricing Feature Table"
-          description="Engineered from every approved source — policies, claims, vendor feeds (market + geo + credit), plus the real UK postcode enrichment. Rebuild pipeline, feature catalog with per-feature provenance, and promotable online store."
-          features={["8 contributing sources", "Feature catalog + lineage", "Offline ↔ Online toggle"]}
+          title="Modelling Mart"
+          description="The modelling dataset: every approved feed joined onto the active book — policies, claims, market benchmark, geospatial hazard, credit bureau, postcode enrichment. Rebuild pipeline, searchable factor catalog with per-factor provenance, and an embedded AI/BI Genie for ad-hoc questions."
+          features={["8 contributing sources", "Factor catalog + lineage", "AI/BI Genie embedded"]}
         />
         <SectionCard
           to="/models"

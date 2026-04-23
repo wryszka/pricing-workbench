@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Send, Loader2, Code2, ChevronDown, ChevronUp, ExternalLink,
-  MessageCircle, Sparkles, RotateCcw, AlertCircle,
+  MessageCircle, Sparkles, RotateCcw, AlertCircle, Database,
 } from 'lucide-react';
 
 const BASE = '/api/genie';
@@ -44,13 +44,22 @@ type Turn = {
 
 export default function GenieChat({
   spaceId, fullScreenUrl, suggestions, height = 520, emptyState,
+  variant = 'default',
+  title = 'AI/BI Genie',
+  subtitle = 'Returns tables, charts, SQL queries',
 }: {
   spaceId: string;
   fullScreenUrl?: string | null;
   suggestions?: string[];
   height?: number;
   emptyState?: React.ReactNode;
+  /** 'default' = purple compact chat; 'card' = blue AI/BI Genie card matching the
+   *  screenshot, with full-width suggestion rows and a prominent header. */
+  variant?: 'default' | 'card';
+  title?: string;
+  subtitle?: string;
 }) {
+  const isCard = variant === 'card';
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
@@ -149,33 +158,83 @@ export default function GenieChat({
 
   const empty = turns.length === 0 && !busy;
 
+  // Per-variant colour tokens so the two styles share one JSX tree
+  const theme = isCard
+    ? {
+        outer:      'bg-white border-blue-200 rounded-xl',
+        header:     'px-5 py-4 border-b border-blue-100',
+        headerIcon: 'text-blue-600',
+        headerText: 'text-blue-700',
+        accent:     'text-blue-600',
+        btnPrimary: 'bg-blue-600 hover:bg-blue-700',
+        focus:      'focus:ring-blue-500 focus:border-blue-500',
+        statusText: 'text-blue-600',
+        bg:         '',
+      }
+    : {
+        outer:      'bg-white border-purple-200 rounded-lg',
+        header:     'bg-purple-50 border-b border-purple-200 px-4 py-2.5',
+        headerIcon: 'text-purple-600',
+        headerText: 'text-purple-800',
+        accent:     'text-purple-600',
+        btnPrimary: 'bg-purple-600 hover:bg-purple-700',
+        focus:      'focus:ring-purple-500 focus:border-purple-500',
+        statusText: 'text-purple-600',
+        bg:         'bg-gradient-to-b from-purple-50/30 to-transparent',
+      };
+
   return (
-    <div className="bg-white border border-purple-200 rounded-lg overflow-hidden flex flex-col" style={{ height }}>
-      {/* Header */}
-      <div className="bg-purple-50 border-b border-purple-200 px-4 py-2.5 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
-          <MessageCircle className="w-4 h-4 text-purple-600" />
-          <span className="text-sm font-semibold text-purple-800">Ask Genie</span>
-          {conversationId && <span className="text-[10px] text-purple-500 font-mono">conversation: {conversationId.slice(0, 8)}…</span>}
-        </div>
-        <div className="flex items-center gap-2">
+    <div className={`${theme.outer} border overflow-hidden flex flex-col`} style={{ height }}>
+      {/* Header — two layouts, same content */}
+      <div className={`${theme.header} flex items-center justify-between shrink-0`}>
+        {isCard ? (
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+              <Database className={`w-5 h-5 ${theme.headerIcon}`} />
+            </div>
+            <div>
+              <div className="text-base font-semibold text-blue-700">{title}</div>
+              <div className="text-xs text-blue-500">{subtitle}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <MessageCircle className={`w-4 h-4 ${theme.headerIcon}`} />
+            <span className={`text-sm font-semibold ${theme.headerText}`}>Ask Genie</span>
+            {conversationId && <span className={`text-[10px] ${theme.accent} font-mono`}>conversation: {conversationId.slice(0, 8)}…</span>}
+          </div>
+        )}
+        <div className="flex items-center gap-3">
           {turns.length > 0 && (
-            <button onClick={reset} className="flex items-center gap-1 text-[11px] text-purple-600 hover:text-purple-900">
+            <button onClick={reset} className={`flex items-center gap-1 text-[11px] ${theme.accent} hover:opacity-80`}>
               <RotateCcw className="w-3 h-3" /> New conversation
             </button>
           )}
           {fullScreenUrl && (
             <a href={fullScreenUrl} target="_blank" rel="noopener noreferrer"
-              className="flex items-center gap-1 text-[11px] text-purple-600 hover:text-purple-900">
+              className={`flex items-center gap-1 text-[11px] ${theme.accent} hover:opacity-80`}>
               Open in Genie <ExternalLink className="w-3 h-3" />
             </a>
           )}
         </div>
       </div>
 
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-purple-50/30 to-transparent">
-        {empty && (
+      {/* Body */}
+      <div ref={scrollRef} className={`flex-1 overflow-y-auto ${isCard ? 'p-4 space-y-2' : 'p-4 space-y-3'} ${theme.bg}`}>
+        {empty && isCard && suggestions && suggestions.length > 0 && (
+          // Card variant: suggestion rows matching the AI/BI Genie screenshot
+          <div className="space-y-2">
+            {suggestions.map((s, i) => (
+              <button key={i} onClick={() => send(s)}
+                className="w-full flex items-center gap-3 px-4 py-3 bg-slate-50 hover:bg-blue-50 border border-transparent hover:border-blue-200 rounded-lg text-left transition-colors">
+                <MessageCircle className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="text-sm text-gray-800">{s}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {empty && !isCard && (
           <div className="text-center text-gray-500 text-sm mt-4">
             {emptyState || <p>Ask a question about this dataset. Genie generates SQL, runs it, and returns a result.</p>}
             {suggestions && suggestions.length > 0 && (
@@ -191,12 +250,10 @@ export default function GenieChat({
           </div>
         )}
 
-        {turns.map((t, i) => (
-          <TurnBubble key={i} turn={t} />
-        ))}
+        {turns.map((t, i) => <TurnBubble key={i} turn={t} />)}
 
         {busy && (
-          <div className="flex items-center gap-2 text-xs text-purple-600 italic">
+          <div className={`flex items-center gap-2 text-xs ${theme.statusText} italic`}>
             <Loader2 className="w-3 h-3 animate-spin" />
             {status || 'Genie is thinking…'}
           </div>
@@ -204,18 +261,18 @@ export default function GenieChat({
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-200 p-3 bg-white shrink-0">
+      <div className={`${isCard ? 'border-t border-blue-100 p-3' : 'border-t border-gray-200 p-3'} bg-white shrink-0`}>
         <div className="flex items-center gap-2">
           <input
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
             disabled={busy}
-            placeholder={conversationId ? 'Follow up…' : 'Ask about this dataset…'}
-            className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none disabled:bg-gray-50"
+            placeholder={isCard ? 'Ask about your data…' : (conversationId ? 'Follow up…' : 'Ask about this dataset…')}
+            className={`flex-1 px-3 py-2 border ${isCard ? 'border-blue-200 rounded-lg' : 'border-gray-300 rounded'} text-sm ${theme.focus} focus:ring-2 outline-none disabled:bg-gray-50`}
           />
           <button onClick={() => send(input)} disabled={busy || !input.trim()}
-            className="px-3 py-2 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1">
+            className={`${isCard ? 'px-3 py-2 rounded-lg' : 'px-3 py-2 rounded'} ${theme.btnPrimary} text-white text-sm disabled:opacity-50 flex items-center gap-1`}>
             <Send className="w-4 h-4" />
           </button>
         </div>

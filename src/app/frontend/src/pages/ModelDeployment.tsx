@@ -152,7 +152,7 @@ export default function ModelDeployment() {
               <strong>Renewal / shadow pricing:</strong> existing customer with a policy_id. Model
               was logged with <code className="bg-white px-1 rounded">fe.log_model(FeatureLookup)</code>,
               so the endpoint fetches the feature vector from the online feature store by policy_id
-              automatically. Promote the Feature Store to online to enable this path end-to-end.
+              automatically. Promote the Modelling Mart to online to enable this path end-to-end.
             </div>
           </div>
         </div>
