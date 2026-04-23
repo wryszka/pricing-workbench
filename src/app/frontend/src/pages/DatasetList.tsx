@@ -71,6 +71,25 @@ export default function DatasetList() {
   );
 }
 
+// Render an ingestion timestamp in relative form ("2 hours ago") with the ISO
+// date as tooltip. Takes the shape Databricks SQL returns — either ISO string
+// or epoch-like.
+function formatIngested(iso?: string | null): string {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return '—';
+  const now = Date.now();
+  const diff = Math.max(0, now - t);
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1)            return 'Just now';
+  if (mins < 60)           return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)            return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30)           return `${days} day${days === 1 ? '' : 's'} ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 function DatasetCard({ ds }: { ds: any }) {
   const category = ds.category || 'external_vendor';
   const isInternal = category === 'internal';
@@ -111,6 +130,10 @@ function DatasetCard({ ds }: { ds: any }) {
             </div>
           ) : (
             <>
+              <div className="text-right min-w-[8rem]">
+                <div className="text-xs text-gray-500">Last ingested</div>
+                <div className="text-sm font-medium">{formatIngested(ds.last_ingested)}</div>
+              </div>
               <div className="text-right min-w-[9rem]">
                 <div className="text-xs text-gray-500">Pending / Approved</div>
                 <div className="text-sm font-medium">

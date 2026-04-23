@@ -26,7 +26,7 @@ export default function DatasetDetail() {
     const valid =
       cat === 'internal'       ? ['quality']
     : cat === 'reference_data' ? ['quality', 'upload']
-    :                            ['diff', 'impact', 'quality', 'upload', 'approval'];
+    :                            ['diff', 'quality', 'impact', 'upload', 'approval'];
     if (!valid.includes(tab)) setTab(valid[0] as Tab);
   }, [datasets, datasetId, tab]);
 
@@ -51,8 +51,8 @@ export default function DatasetDetail() {
       ]
     : [
         { id: 'diff',    label: 'Data Changes',     icon: GitCompare },
-        { id: 'impact',  label: 'Impact Analysis',  icon: TrendingUp },
         { id: 'quality', label: 'Data Quality',     icon: ShieldCheck },
+        { id: 'impact',  label: 'Impact Analysis',  icon: TrendingUp },
         { id: 'upload',  label: 'Upload / Download', icon: Upload },
         { id: 'approval',label: 'Approve / Reject', icon: CheckCircle2 },
       ];
