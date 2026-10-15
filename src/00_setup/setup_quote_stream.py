@@ -141,7 +141,7 @@ for code, region in POSTCODE_REGION.items():
 CONSTRUCTION_TYPES = ["Fire Resistive", "Non-Combustible", "Joisted Masonry", "Frame", "Heavy Timber"]
 ROOF_TYPES         = ["Metal Deck", "Concrete", "Tiled", "Flat Membrane", "Slated"]
 FLOOD_ZONES        = ["Low", "Medium", "High"]
-PREVIOUS_INSURERS  = ["Aviva", "Zurich", "Allianz", "RSA", "AIG", "QBE", "Hiscox", "None"]
+PREVIOUS_INSURERS  = ["Aviva", "Zurich", "Allianz", "RSA", "AIG", "QBE", "Ecclesiastical", "None"]
 CHANNELS           = ["Direct", "Broker", "Aggregator", "Renewal"]
 SALES_USERS        = ["sales.agent.01", "sales.agent.02", "sales.agent.03",
                       "self_service.portal", "broker.portal.uk"]
